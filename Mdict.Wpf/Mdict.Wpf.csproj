@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>MdictViewer</AssemblyName>
+    <RootNamespace>Mdict.Wpf</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="WebView\AudioBridge.js" LogicalName="Mdict.Wpf.WebView.AudioBridge.js" />
+    <EmbeddedResource Include="WebView\EntryBridge.js" LogicalName="Mdict.Wpf.WebView.EntryBridge.js" />
+    <ProjectReference Include="..\Mdict.Application\Mdict.Application.csproj" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
+  </ItemGroup>
+</Project>

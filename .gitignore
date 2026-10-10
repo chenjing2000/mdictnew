@@ -1,0 +1,21 @@
+# Build output / local Visual Studio
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
+
+# Dictionary files are not included in the source repository
+*.mdx
+*.mdd
+*.MDX
+*.MDD
+
+# Extracted resources / diagnostics
+*.mp3
+*.png
+*.log
+*.html
+
+# Local development metadata
+TestResults/
