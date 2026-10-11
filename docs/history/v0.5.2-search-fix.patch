@@ -1,0 +1,59 @@
+diff --git a/Mdict.Wpf/MainWindow.xaml.cs b/Mdict.Wpf/MainWindow.xaml.cs
+index 94d6c5d..cc17bbe 100644
+--- a/Mdict.Wpf/MainWindow.xaml.cs
++++ b/Mdict.Wpf/MainWindow.xaml.cs
+@@ -133,7 +133,7 @@ namespace Mdict.Wpf
+             else if (e.Key == Key.Escape)
+             {
+                 if (SuggestionPopup.IsOpen || suggestionTimer.IsEnabled ||
+-                    pendingSuggestionPrefix != null)
++                    pendingSuggestionPrefix != null || suggestionSearchRunning)
+                 {
+                     e.Handled = true;
+                     CloseSuggestions();
+@@ -146,8 +146,12 @@ namespace Mdict.Wpf
+                     ? selected : WordText.Text;
+                 await LookupAsync(word, true, -1, true);
+             }
+-            // Tab retains the normal WPF focus behavior. The focus change
+-            // closes suggestions without accidentally committing an entry.
++            else if (e.Key == Key.Tab)
++            {
++                // Cancel even when the mouse is still over the Popup.
++                // Leave Handled false so normal keyboard traversal continues.
++                CloseSuggestions();
++            }
+         }
+ 
+         private void WordText_TextChanged(object sender, TextChangedEventArgs e)
+@@ -341,10 +345,12 @@ namespace Mdict.Wpf
+ 
+         private void MainWindow_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+         {
+-            // Popup lives in its own visual tree. Its item clicks never
+-            // bubble through this Window, so they remain independently usable.
+-            if (!WordText.IsMouseOver)
+-                CloseSuggestions();
++            // Popup has a separate HWND, but its preview events still route
++            // through the logical Window ancestor before reaching the item.
++            if (e.OriginalSource is DependencyObject source &&
++                (WordText.IsAncestorOf(source) || SuggestionBorder.IsAncestorOf(source)))
++                return;
++            CloseSuggestions();
+         }
+ 
+         private void DictionaryWebView_GotKeyboardFocus(object sender,
+diff --git a/Mdict.Wpf/MainWindow.xaml b/Mdict.Wpf/MainWindow.xaml
+index f8a2757..ac79283 100644
+--- a/Mdict.Wpf/MainWindow.xaml
++++ b/Mdict.Wpf/MainWindow.xaml
+@@ -2,7 +2,7 @@
+         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+-        Title="MdictViewer v0.5.1" Height="750" Width="1100"
++        Title="MdictViewer v0.5.2" Height="750" Width="1100"
+         MinHeight="450" MinWidth="620"
+         WindowStartupLocation="CenterScreen"
+         Loaded="MainWindow_Loaded" Closed="MainWindow_Closed"
+

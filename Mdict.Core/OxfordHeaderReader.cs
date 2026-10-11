@@ -80,7 +80,8 @@ public class OxfordHeaderReader
             // Some real MDict files contain imperfect XML in Description.
             // Extract only double-quoted header attributes; don't depend on
             // the entire header being valid XML.
-            Match rootMatch = Regex.Match(headerText, @"<\s*([A-Za-z_][A-Za-z0-9_]*)\b");
+            Match rootMatch = Regex.Match(headerText, @"<\s*([A-Za-z_][A-Za-z0-9_]*)\b",
+                RegexOptions.NonBacktracking);
             if (!rootMatch.Success)
             {
                 throw new InvalidDataException("MDict header root element was not found.");
@@ -104,7 +105,7 @@ public class OxfordHeaderReader
             MatchCollection matches = Regex.Matches(
                 headerText,
                 @"([A-Za-z_][A-Za-z0-9_]*)\s*=\s*""([^""]*)""",
-                RegexOptions.Singleline);
+                RegexOptions.Singleline | RegexOptions.NonBacktracking);
 
             foreach (Match match in matches)
             {

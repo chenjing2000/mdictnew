@@ -1,67 +1,67 @@
-# MdictViewer v0.4.0
+# MdictViewer
 
-纯 C# / .NET 8 / WPF + WebView2，适配已经实测的 Oxford Advanced Learner's Dictionary 10 V14.3 MDX 及其五个 MDD 分卷。
+C# / .NET 10 / WPF + WebView2 的本地 MDX 查词程序。已用 Oxford 第 10 版 V14.3 MDX 和五个配套 MDD 分卷进行集成测试，不保证兼容所有第三方词典格式。
 
-## v0.4.0：Oxford 内部词条跳转及返回历史
+当前发布入口：`dist/MdictViewer/MdictViewer.exe`。
 
-基于 Windows 实机验证通过的 v0.3.2（HTML、原词典 CSS/JS、插图、英美音、F9）。本版新增：
+## 当前功能
 
-- 点击 Oxford 释义中的 `entry://cooking-apple`、`entry://the-big-apple`、`entry://appleCC` 等链接时，使用原有 `DictionaryService.Lookup()` 打开新词条并更新搜索框。
-- 增加搜索框左侧的 **← 返回上一词条** 按钮，统一记录成功的手动查词和内部链接跳转；上限 50 条。F9、发音、图片和 `#...` 页内锚点不进入历史。
-- 找不到目标词条时保留原页面和历史，只在状态栏提示；**不会**将失败查词追加历史。
-- 返回时重新查词并从页面顶部显示；不恢复旧页面的滚动/折叠状态。返回后新查词会丢弃旧的前进分支。
-- 在 `NavigationStarting` 中同步取消内部 `/lookup` 中转导航，然后经 WPF Dispatcher 在事件之外调度新查词；被主动取消的中间导航不会进入普通词条的完成/失败判定。
-- `EntryBridge.js` 只捕获 `entry://` 的点击，按原始 href 解码一次后编码转发。完整保留 `@`、`&`、`+` 等 Key 标识，不把它们错误拆解为 URL 主机/参数。
-- **不修改** `Mdict.Core`、`Mdict.Application`、原有 `AudioBridge.js`、`WebResourceHandler.cs` 及其 24 项 Core 自测。
+- 启动输入框和结果页留空，只打开配置的词典，不查示例词、不恢复旧词、不读取词条索引。
+- 回车查词，输入框保留焦点；顶部包含后退、前进和设置图标。
+- 设置最多 8 个 MDX 文件路径，按配置顺序纵向显示独立结果区，每区显示词典名称。
+- 圆角路径输入框和按钮，绘制的加号、减号与文件夹图标。
+- 设置页统一字号 15。主窗口最大尺寸等于所在显示器的可用工作区，不设固定上限；设置窗口仍最大 `1000 × 700` 逻辑像素且受工作区限制。
+- 圆形底色 `#ddc5b8`、绘制式 M `#106898` 的图标用于窗口、任务栏与 EXE，包含七种尺寸和透明外围。圆形减少留白，M 比首版放大 15%。
+- 150 毫秒防抖候选，最多 12 项，支持方向键、回车、鼠标选择和 Esc 关闭。
+- 手动查询、候选和内部词条链接统一更新全部词典，共用最多 50 条内存历史；后退后查新词删除前进分支。
+- 部分未命中或失败只影响对应结果区；全部未命中保留页面和历史。手动失败保留编辑文字，内部链接失败恢复已显示词。
+- 每个词典独立读取 CSS、图片和音频，支持同页锚点、折叠、图片缩放与外层滚动。
 
-## 代码与模块边界
+路径设置保存在 `%LocalAppData%/MdictViewer/dictionaries.json`。命令行 MDX 路径只覆盖本次启动，不改写保存的设置；修改词典配置重置历史并重新查询当前已显示词。
 
-- `Mdict.Core`：原 Oxford MDX/MDD 解析算法、内存 Key 索引及按需资源读取。
-- `Mdict.Application`：现有 `DictionaryService` 负责查词和资源访问，仍然序列化 Reader 调用。
-- `Mdict.Wpf/WebView/EntryBridge.js`：仅识别/转换用户点击的内部词条链接。
-- `Mdict.Wpf/WebView/WebViewController.cs`：仅负责浏览器导航、内部 `/lookup` 拦截、向 UI 发 `EntryLookupRequested` 事件；不管理历史或读 MDX。
-- `Mdict.Wpf/MainWindow.xaml.cs`：单一查词入口、搜索框同步、50 条内存历史及返回按钮。
-- `MdictReaderTest`：保持已验证的 24 项回归测试，直接引用 Core，无第二份解析源码。
+Oxford 的 MDX 同目录应包含同名 `.mdd`、`.1.mdd` 至 `.4.mdd`。设置中选择的是 **MDX 文件**，不是文件夹。
 
-`entry://...` → EntryBridge → `https://mdict.invalid/lookup?key=...` → WebViewController（取消内部导航并通知 UI）→ MainWindow → DictionaryService → Core → WebView2 显示新词条。
+## 构建与运行
 
-普通 `sound://`、`#anchor`、Oxford 折叠/图片放大仍由 v0.3.2 的原有机制处理。不需要打开 WebMessage 或暴露高权限 C# 对象。
+需要 Windows、.NET 10 SDK / Desktop Runtime 和 WebView2 Runtime。`global.json` 固定 SDK 10.0.400，允许同功能带的更新补丁；本机使用 SDK 10.0.400、运行时 10.0.11。本项目不是旧式 .NET Framework 项目。
 
-## Windows 验证步骤
-
-在 Windows 10/11，安装 .NET 8 SDK、WebView2 Runtime。解压后从解决方案根目录执行：
+本机 PATH 中仍是 .NET 8，使用已安装的用户目录 SDK：
 
 ```powershell
-dotnet restore .\MdictViewer.sln
-dotnet build .\MdictViewer.sln
-dotnet run --project .\MdictReaderTest -- --self-test
-dotnet run --project .\Mdict.Wpf
+$dotnet = "$env:USERPROFILE\.dotnet\dotnet.exe"
+& $dotnet build .\MdictViewer.sln -c Release --artifacts-path artifacts/build
+& $dotnet run --project .\Mdict.Wpf
 ```
 
-打开 Oxford V14.3 MDX（其同名 `.mdd`、`.1.mdd` 至 `.4.mdd` 在同文件夹），尝试：
+也可运行 `Mdict.Wpf/run.cmd`。三个 CMD 启动脚本优先使用符合项目 SDK 要求的用户目录 `dotnet.exe`，否则使用 PATH。其他机器若 SDK 10 已在 PATH，可直接使用 `dotnet`。
 
-1. 查询 `apple`，点击 “see also” 的 `cooking apple`，新页面应显示，对应搜索框更新；点击 “←” 返回 apple。
-2. 点击 `Big Apple` 和 `appleCC` 等词典内部链接；某些 Oxford 私有标识可能不存在对应的 MDX Key，失败时应保留原词条并提示。
-3. 手动查 `banana`、点击内部词条后多次返回；手动查词与内部跳转共用历史。当前词条重复查询不产生连续重复记录。
-4. 点击 `Idioms` 仅滚动到习语；点击英美音仍正常发声；折叠和图片放大均正常。
-5. 未找到词条应只更新状态栏，原页面仍显示；F9 自测后按“查词”应恢复 Oxford 页面。原有 24 项核心测试全部通过。
-6. 测试用户快速连续点击内部链接；不应出现 `OperationCanceled`、白屏或把旧词条显示为新词条。
-
-可选（有 Node.js 的开发电脑）：
+发布为依赖本机运行时的程序：
 
 ```powershell
+& $dotnet publish .\Mdict.Wpf\Mdict.Wpf.csproj -c Release --artifacts-path artifacts/build -o dist/MdictViewer
+```
+
+## 验证
+
+```powershell
+& $dotnet run --project .\MdictReaderTest -- --self-test
 node .\dev-tests\entry_bridge_test.cjs
+node .\dev-tests\layout_bridge_test.cjs
+& $dotnet run --project .\dev-tests\Mdict.Wpf.Tests -- "<Oxford MDX 完整路径>"
 ```
 
-这是不依赖 Oxford 文件、Node 内置模块驱动的脚本事件模拟测试，不是运行程序的必需项。
+Core 自测 28 项；WPF 集成检查 115 项；Entry / Layout 桥接分别 12 / 9 项，共 164 项。WPF 测试会短暂打开窗口，使用独立临时设置，并验证真实词典、启动留空、窗口限制、图标、事件路由、DOM、候选取消、统一历史、多词典、设置界面与浏览器初始化失败后的重试。
 
-## 暂不支持
+这些测试不替代原生键鼠操作和实际音频试听，也不证明所有词典脚本兼容。重新构建默认输出中的主程序前，应关闭对应实例，避免文件占用。
 
-- 前进按钮、历史持久化、滚动位置恢复、全文搜索、多词典模式。
-- 未经实测的 Oxford 特殊 `@@@LINK` 链式重定向；如在真实内部链接中遇到，再根据明确样本处理。
-- `$env:MDICT_DISABLE_SCRIPTS='1'` 会同时关闭 Oxford 脚本、音频桥接和内部链接桥接（用于调试脚本问题）。
-- 已有的“资源成功 7 / 失败 1”尚未确定具体失败请求，不修改已通过的资源读取行为。
+## 代码与记录
 
-## 验证说明
+- [模块职责与数据流](docs/architecture.md)
+- [最新整体复查与清理记录](docs/final-audit.md)
+- [启动留空、字号、图标与窗口限制](docs/startup-and-appearance.md)
+- [代码审查、整改和清理记录](docs/review-and-cleanup.md)
+- [历史 handoff、调试记录和方案](docs/history/README.md)
 
-此交付环境未安装 Windows/.NET SDK/WebView2 Runtime，不能在此执行 Windows WPF 程序，也不能在真实 Oxford 上实测该版本。已检查 XAML / 项目 XML、嵌入资源名称、JS 语法、模拟 `entry://` 点击和 ZIP 完整性；仍需根据 Windows 设备的构建和交互结果最终验收。
+源码、测试和历史文档保留；旧构建、旧发布和旧测试缓存已清理。当前验证日志位于 `artifacts/final-audit`，发布统一位于 `dist/MdictViewer`，均由 `.gitignore` 排除。词典文件、WebView2 缓存和个人 IDE 设置不进入版本管理；合法的图片、HTML 和音频资源不被全局忽略。忽略规则已通过 40 项正反例检查。
+
+暂不实现模糊查询、全文搜索、拼写纠错、新索引系统或历史持久化。现有线性搜索保持不变，实际出现瓶颈后再测量和优化。

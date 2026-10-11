@@ -12,7 +12,6 @@ public class OxfordDictionary
     public string MdxPath { get; private set; }
     public List<string> MddPaths { get; private set; } = new List<string>();
 
-    private MdictHeader mdxHeader;
     private KeySectionInfo mdxKeys;
     private RecordSectionInfo mdxRecords;
     private readonly OxfordRecordReader recordReader = new OxfordRecordReader();
@@ -175,9 +174,12 @@ public class OxfordDictionary
     {
         if (mdxKeys != null)
             return;
-        mdxHeader = new OxfordHeaderReader().Read(MdxPath);
-        mdxKeys = new OxfordKeyReader().Read(mdxHeader, true);
-        mdxRecords = recordReader.ReadIndex(mdxHeader, mdxKeys);
+        MdictHeader header = new OxfordHeaderReader().Read(MdxPath);
+        KeySectionInfo keys = new OxfordKeyReader().Read(header, true);
+        RecordSectionInfo records = recordReader.ReadIndex(header, keys);
+        // Publish only a complete index so a failed load can be retried.
+        mdxRecords = records;
+        mdxKeys = keys;
     }
 
     private static string NormalizeResourcePath(string path)

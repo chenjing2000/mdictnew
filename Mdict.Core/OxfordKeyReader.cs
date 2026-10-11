@@ -130,7 +130,9 @@ public class OxfordKeyReader
                 info.DecompressedSize = MdictBinary.ReadInt64(reader);
                 info.FileOffset = offset;
 
-                if (info.EntryCount <= 0 || info.CompressedSize < 8 || info.DecompressedSize <= 0 ||
+                int minimumEntryBytes = isMdd ? 10 : 9;
+                if (info.EntryCount <= 0 || info.EntryCount > info.DecompressedSize / minimumEntryBytes ||
+                    info.CompressedSize < 8 || info.DecompressedSize <= 0 ||
                     info.CompressedSize > MaxKeyBlockCompressed ||
                     info.DecompressedSize > MaxKeyBlockDecompressed)
                     throw new InvalidDataException("Invalid Key Block metadata at index " + block);

@@ -4,6 +4,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Collections.Generic;
 using System.Text;
+using System.Diagnostics;
 
 namespace MdictReaderTest
 {
@@ -235,7 +236,40 @@ internal class SelfTest
                 "Ambiguous filename rejected; full resource key still works");
             Console.WriteLine("PASS: Oxford find results and ambiguous filename protection");
 
-            Console.WriteLine("All 24 self-tests passed.");
+            string retryPath = Path.Combine(directory, "retry.mdx");
+            WriteThreeBlockSample(retryPath, false);
+            AppendRecordSection(retryPath);
+            byte[] validRetry = File.ReadAllBytes(retryPath);
+            KeySectionInfo retryKeys = new OxfordKeyReader().Read(headerReader.Read(retryPath), true);
+            byte[] brokenRetry = (byte[])validRetry.Clone();
+            brokenRetry[checked((int)retryKeys.RecordSectionOffset + 23)] ^= 1;
+            File.WriteAllBytes(retryPath, brokenRetry);
+            OxfordDictionary retryDictionary = new OxfordDictionary(retryPath);
+            ExpectInvalidData(delegate { retryDictionary.Lookup("apple"); }, "First incomplete index load");
+            ExpectInvalidData(delegate { retryDictionary.Lookup("apple"); }, "Repeated incomplete index load");
+            ExpectInvalidData(delegate { retryDictionary.SearchPrefix("ap", 10); }, "Prefix after incomplete index load");
+            Console.WriteLine("PASS: Failed index loads never publish incomplete indexes");
+            File.WriteAllBytes(retryPath, validRetry);
+            Assert(retryDictionary.Lookup("apple") == "<p>apple 苹果</p>" &&
+                retryDictionary.SearchPrefix("ap", 10).Count == 2, "Reload repaired dictionary after failed initialization");
+            Console.WriteLine("PASS: Repaired dictionary can reload after failed initialization");
+
+            string longHeaderPath = Path.Combine(directory, "long-header.mdx");
+            WriteSample(longHeaderPath, "<Dictionary Title=\"bounded\" " + new string('a', 100000) + " />");
+            Stopwatch timer = Stopwatch.StartNew();
+            Assert(headerReader.Read(longHeaderPath).GetAttribute("Title") == "bounded", "Long malformed attribute suffix");
+            Assert(timer.Elapsed < TimeSpan.FromSeconds(3), "Header parsing must not rescan every identifier suffix");
+            Console.WriteLine("PASS: Long malformed header suffix parses without quadratic backtracking");
+
+            string impossiblePath = Path.Combine(directory, "impossible-entries.mdx");
+            WriteV2Sample(impossiblePath, false, 1000);
+            bool metadataRejected = false;
+            try { new OxfordKeyReader().Read(headerReader.Read(impossiblePath), true); }
+            catch (InvalidDataException ex) { metadataRejected = ex.Message.StartsWith("Invalid Key Block metadata"); }
+            Assert(metadataRejected, "Impossible Key entry count must fail in metadata validation before block allocation");
+            Console.WriteLine("PASS: Impossible Key entry count rejected before block allocation");
+
+            Console.WriteLine("All 28 self-tests passed.");
             return 0;
         }
         catch (Exception ex)
@@ -272,7 +306,7 @@ internal class SelfTest
         Assert(hash == expected, "RIPEMD-128: " + text + "; actual " + hash);
     }
 
-    private static void WriteV2Sample(string path, bool encrypted)
+    private static void WriteV2Sample(string path, bool encrypted, long declaredEntries = 2)
     {
         string xml = "<Dictionary GeneratedByEngineVersion=\"2.0\" " +
             "Encoding=\"UTF-8\" Encrypted=\"" + (encrypted ? "2" : "No") + "\" Title=\"Keys\" />\r\n\0";
@@ -300,7 +334,7 @@ internal class SelfTest
             using (MemoryStream buffer = new MemoryStream())
             using (BinaryWriter indexWriter = new BinaryWriter(buffer, Encoding.UTF8, true))
             {
-                WriteUInt64BE(indexWriter, 2);
+                WriteUInt64BE(indexWriter, declaredEntries);
                 WriteUInt16BE(indexWriter, 5);
                 indexWriter.Write(Encoding.UTF8.GetBytes("apple\0"));
                 WriteUInt16BE(indexWriter, 6);
@@ -332,7 +366,7 @@ internal class SelfTest
             using (BinaryWriter numbers = new BinaryWriter(buffer))
             {
                 WriteUInt64BE(numbers, 1);
-                WriteUInt64BE(numbers, 2);
+                WriteUInt64BE(numbers, declaredEntries);
                 WriteUInt64BE(numbers, indexData.Length);
                 WriteUInt64BE(numbers, packedIndex.Length);
                 WriteUInt64BE(numbers, packedKeys.Length);

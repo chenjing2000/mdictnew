@@ -12,7 +12,7 @@ namespace Mdict.Wpf.WebView
 {
     // Translate requests on our private HTTPS origin into HTML or MDD bytes.
     // This class knows about WebView2, never about MDX/MDD internals.
-    public class WebResourceHandler
+    public class WebResourceHandler : IDisposable
     {
         public const string Origin = "https://mdict.invalid";
 
@@ -20,6 +20,7 @@ namespace Mdict.Wpf.WebView
         private readonly CoreWebView2 browser;
         private long currentPageId;
         private string currentPage = "";
+        private bool disposed;
 
         public int CssSuccess { get; private set; }
         public int JsSuccess { get; private set; }
@@ -54,6 +55,13 @@ namespace Mdict.Wpf.WebView
             // Do not allow ordinary network fallback for an Oxford document.
             browser.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
             browser.WebResourceRequested += OnWebResourceRequested;
+        }
+
+        public void Dispose()
+        {
+            if (disposed) return;
+            disposed = true;
+            browser.WebResourceRequested -= OnWebResourceRequested;
         }
 
         private async void OnWebResourceRequested(object sender,
@@ -109,6 +117,7 @@ namespace Mdict.Wpf.WebView
                 try
                 {
                     byte[] content = await Task.Run(() => dictionaryService.GetResource(key));
+                    if (disposed) return;
                     if (content == null)
                     {
                         ResourceFailures++;
@@ -133,6 +142,7 @@ namespace Mdict.Wpf.WebView
                 }
                 catch (Exception ex)
                 {
+                    if (disposed) return;
                     ResourceFailures++;
                     LastError = key + " (" + ex.Message + ")";
                     Debug.WriteLine("[MdictViewer MDD error] " + LastError);
@@ -227,13 +237,7 @@ namespace Mdict.Wpf.WebView
         }
 
         private CoreWebView2WebResourceResponse MakeResponse(
-            byte[] bytes, string type, int status, string reason)
-        {
-            return MakeResponse(bytes, type, status, reason, "");
-        }
-
-        private CoreWebView2WebResourceResponse MakeResponse(
-            byte[] bytes, string type, int status, string reason, string extraHeaders)
+            byte[] bytes, string type, int status, string reason, string extraHeaders = "")
         {
             // Keep stream alive after this method returns: WebView2 consumes it later.
             MemoryStream stream = new MemoryStream(bytes, false);

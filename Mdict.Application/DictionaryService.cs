@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using Mdict.Core;
 
 namespace Mdict.Application
@@ -15,23 +14,6 @@ namespace Mdict.Application
         public bool IsOpen
         {
             get { lock (sync) { return dictionary != null; } }
-        }
-
-        public string DictionaryName
-        {
-            get
-            {
-                lock (sync)
-                {
-                    return dictionary == null ? "" :
-                        Path.GetFileNameWithoutExtension(dictionary.MdxPath);
-                }
-            }
-        }
-
-        public int MddCount
-        {
-            get { lock (sync) { return dictionary == null ? 0 : dictionary.MddPaths.Count; } }
         }
 
         public void Open(string mdxPath)

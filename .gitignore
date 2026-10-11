@@ -1,21 +1,31 @@
-# Build output / local Visual Studio
+# .NET build output and local IDE state
 **/bin/
 **/obj/
+/artifacts/
+/dist/
+/dev-tests/artifacts-*/
 .vs/
 *.user
 *.suo
+*.userosscache
+*.sln.docstates
 
 # Dictionary files are not included in the source repository
-*.mdx
-*.mdd
-*.MDX
-*.MDD
+*.[mM][dD][xX]
+*.[mM][dD][dD]
 
-# Extracted resources / diagnostics
-*.mp3
-*.png
+# WebView2 profiles, generated test logs and screenshots
+**/*.WebView2/
+**/EBWebView/
+**/TestResults/
+/dev-tests/*-results.txt
+/dev-tests/screenshots/
+*.trx
 *.log
-*.html
 
-# Local development metadata
-TestResults/
+# Temporary and OS files; legitimate source images/HTML are not ignored
+*.tmp
+*.bak
+Thumbs.db
+Desktop.ini
+.DS_Store

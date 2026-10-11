@@ -1,9 +1,12 @@
 using System;
 using System.Globalization;
+using System.ComponentModel;
 using System.IO;
 using System.Reflection;
 using System.Net;
 using System.Text;
+using System.Text.Json;
+using System.Windows;
 using System.Windows.Threading;
 using System.Threading.Tasks;
 using Microsoft.Web.WebView2.Core;
@@ -13,33 +16,43 @@ using Mdict.Application;
 namespace Mdict.Wpf.WebView
 {
     // Browser navigation and display only; no MDX/MDD format knowledge.
-    public class WebViewController
+    public class WebViewController : IDisposable
     {
-        private readonly WebView2 view;
+        private readonly IWebView2 view;
         private readonly DictionaryService dictionaryService;
         private WebResourceHandler resources;
         private bool initialized;
         private bool navigationBusy;
         private string permittedUrl = "";
         private ulong navigationId;
+        private bool disposed;
+        private TaskCompletionSource<CoreWebView2NavigationCompletedEventArgs> pendingNavigation;
+        private double contentHeight;
+        private readonly DependencyPropertyDescriptor zoomProperty;
 
         // A requested entry key is delivered to the UI, not looked up here.
         public event Action<string> EntryLookupRequested;
+        public event Action<double> ContentHeightChanged;
+        public event Action<double> ScrollRequested;
+        public event Action<double> AnchorRequested;
 
-        public WebViewController(WebView2 webView, DictionaryService service)
+        public WebViewController(IWebView2 webView, DictionaryService service)
         {
             view = webView;
             dictionaryService = service;
+            zoomProperty = DependencyPropertyDescriptor.FromName("ZoomFactor", view.GetType(), view.GetType());
+            zoomProperty?.AddValueChanged(view, OnZoomFactorChanged);
         }
 
         public async Task InitializeAsync()
         {
-            await view.EnsureCoreWebView2Async();
+            await view.EnsureCoreWebView2Async(null);
+            if (disposed) throw new ObjectDisposedException(nameof(WebViewController));
             CoreWebView2 core = view.CoreWebView2;
             // Developer diagnostic switch only; Oxford scripts enabled by default.
             bool disableScripts = Environment.GetEnvironmentVariable("MDICT_DISABLE_SCRIPTS") == "1";
             core.Settings.IsScriptEnabled = !disableScripts;
-            core.Settings.IsWebMessageEnabled = false;
+            core.Settings.IsWebMessageEnabled = true;
             core.Settings.AreHostObjectsAllowed = false;
 #if DEBUG
             core.Settings.AreDevToolsEnabled = true;
@@ -49,6 +62,8 @@ namespace Mdict.Wpf.WebView
             core.NavigationStarting += OnNavigationStarting;
             core.NewWindowRequested += OnNewWindowRequested;
             core.PermissionRequested += OnPermissionRequested;
+            core.WebMessageReceived += OnWebMessageReceived;
+            view.ZoomFactorChanged += OnZoomFactorChanged;
             resources = new WebResourceHandler(core, dictionaryService);
             resources.Register();
             if (!disableScripts)
@@ -56,9 +71,9 @@ namespace Mdict.Wpf.WebView
                 // Both bridges must be registered before the first document.
                 await RegisterEmbeddedScriptAsync(core, "AudioBridge.js");
                 await RegisterEmbeddedScriptAsync(core, "EntryBridge.js");
+                await RegisterEmbeddedScriptAsync(core, "LayoutBridge.js");
             }
             initialized = true;
-            await ShowMessageAsync("请先打开 Oxford MDX 词典。");
         }
 
         private static async Task RegisterEmbeddedScriptAsync(CoreWebView2 core, string filename)
@@ -129,10 +144,10 @@ namespace Mdict.Wpf.WebView
                 // Cancel synchronously, but never start a new navigation inside
                 // NavigationStarting: it would cancel the active navigation ID.
                 e.Cancel = true;
-                view.Dispatcher.BeginInvoke(DispatcherPriority.Background,
+                ((FrameworkElement)view).Dispatcher.BeginInvoke(DispatcherPriority.Background,
                     new Action(() =>
                     {
-                        if (!navigationBusy)
+                        if (!disposed && !navigationBusy)
                             EntryLookupRequested?.Invoke(key);
                     }));
                 return;
@@ -164,6 +179,39 @@ namespace Mdict.Wpf.WebView
         private void OnPermissionRequested(object sender, CoreWebView2PermissionRequestedEventArgs e)
         {
             e.State = CoreWebView2PermissionState.Deny;
+        }
+
+        private void OnWebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
+        {
+            // Ignore frames, foreign origins and callbacks from replaced documents.
+            if (disposed || (e.Source != permittedUrl && !e.Source.StartsWith(permittedUrl + "#", StringComparison.Ordinal)))
+                return;
+            try
+            {
+                using var message = JsonDocument.Parse(e.WebMessageAsJson);
+                var root = message.RootElement;
+                if (root.ValueKind != JsonValueKind.Object ||
+                    !root.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String ||
+                    !root.TryGetProperty("value", out var value) || value.ValueKind != JsonValueKind.Number ||
+                    !value.TryGetDouble(out double number) ||
+                    !double.IsFinite(number) || Math.Abs(number) > 1000000) return;
+                switch (type.GetString())
+                {
+                    case "mdict-height" when number > 0:
+                        contentHeight = number;
+                        ContentHeightChanged?.Invoke(number * view.ZoomFactor);
+                        break;
+                    case "mdict-scroll": ScrollRequested?.Invoke(number * view.ZoomFactor); break;
+                    case "mdict-anchor" when number >= 0: AnchorRequested?.Invoke(number * view.ZoomFactor); break;
+                }
+            }
+            catch (JsonException) { }
+        }
+
+        private void OnZoomFactorChanged(object sender, EventArgs e)
+        {
+            if (!disposed && contentHeight > 0)
+                ContentHeightChanged?.Invoke(contentHeight * view.ZoomFactor);
         }
 
         public async Task<int> ShowEntryAsync(string html)
@@ -206,7 +254,7 @@ namespace Mdict.Wpf.WebView
                 "style=\"padding:25px;font-family:Segoe UI;background:#fff;color:#202020\">" +
                 "<h1 style=\"color:#116d44\">WebView2 显示测试</h1>" +
                 "<p>如果看到这段文字，说明浏览器能显示普通 HTML。</p>" +
-                "<p>按查询按钮可返回 Oxford 词条。</p></body></html>";
+                "<p>在输入框内按回车可返回词条。</p></body></html>";
             string url = resources.PreparePage(page);
             return await NavigateAndInspectAsync(url, 15000);
         }
@@ -218,24 +266,9 @@ namespace Mdict.Wpf.WebView
                 resources.ResourceSuccess + " / 失败 " + resources.ResourceFailures;
         }
 
-        public async Task<string> GetDomResourceStateAsync()
-        {
-            string sheets = await view.CoreWebView2.ExecuteScriptAsync(
-                "document.styleSheets ? document.styleSheets.length : 0");
-            string images = await view.CoreWebView2.ExecuteScriptAsync(
-                "Array.from(document.images).filter(x => x.complete && x.naturalWidth > 0).length");
-            string total = await view.CoreWebView2.ExecuteScriptAsync(
-                "document.images.length");
-            return "样式表 " + sheets + "；图片显示 " + images + "/" + total;
-        }
-
-        public string LastResourceError
-        {
-            get { return resources == null ? "" : resources.LastError; }
-        }
-
         private async Task<int> NavigateAndInspectAsync(string url, int timeoutMilliseconds)
         {
+            if (disposed) throw new ObjectDisposedException(nameof(WebViewController));
             if (!initialized)
                 throw new InvalidOperationException("WebView2 尚未初始化。");
             if (navigationBusy)
@@ -244,6 +277,7 @@ namespace Mdict.Wpf.WebView
             TaskCompletionSource<CoreWebView2NavigationCompletedEventArgs> completed =
                 new TaskCompletionSource<CoreWebView2NavigationCompletedEventArgs>(
                     TaskCreationOptions.RunContinuationsAsynchronously);
+            pendingNavigation = completed;
             // Both Oxford entries and the F9 self-test use the same HTTPS route.
             // Only accept the completion of our own navigation, not an older one.
             EventHandler<CoreWebView2NavigationCompletedEventArgs> handler =
@@ -281,8 +315,31 @@ namespace Mdict.Wpf.WebView
             finally
             {
                 navigationBusy = false;
-                view.CoreWebView2.NavigationCompleted -= handler;
+                pendingNavigation = null;
+                if (!disposed) view.CoreWebView2.NavigationCompleted -= handler;
             }
+        }
+
+        public void Dispose()
+        {
+            if (disposed) return;
+            disposed = true;
+            pendingNavigation?.TrySetCanceled();
+            view.ZoomFactorChanged -= OnZoomFactorChanged;
+            zoomProperty?.RemoveValueChanged(view, OnZoomFactorChanged);
+            resources?.Dispose();
+            var core = view.CoreWebView2;
+            if (core != null)
+            {
+                core.NavigationStarting -= OnNavigationStarting;
+                core.NewWindowRequested -= OnNewWindowRequested;
+                core.PermissionRequested -= OnPermissionRequested;
+                core.WebMessageReceived -= OnWebMessageReceived;
+            }
+            EntryLookupRequested = null;
+            ContentHeightChanged = null;
+            ScrollRequested = null;
+            AnchorRequested = null;
         }
     }
 }
