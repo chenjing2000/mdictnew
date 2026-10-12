@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Controls;
 using System.Windows.Threading;
+using System.Windows.Interop;
 
 namespace Mdict.Wpf
 {
@@ -32,6 +33,7 @@ namespace Mdict.Wpf
         private const int MaxSuggestions = 12;
         private const int PrefixFetchLimit = 48;
         private readonly DispatcherTimer suggestionTimer = new DispatcherTimer();
+        private readonly DispatcherTimer statusTimer = new DispatcherTimer();
         private bool controlsReady;
         private bool updatingWordText;
         private bool suggestionSearchRunning;
@@ -46,10 +48,28 @@ namespace Mdict.Wpf
         {
             settingsPath = configurationPath;
             InitializeComponent();
-            WindowSizeLimits.Attach(this, double.PositiveInfinity, double.PositiveInfinity);
+            statusTimer.Interval = TimeSpan.FromSeconds(6);
+            statusTimer.Tick += (_, _) => ShowStatus("");
+            ShowStatus("正在初始化…");
             suggestionTimer.Interval = TimeSpan.FromMilliseconds(150);
             suggestionTimer.Tick += SuggestionTimer_Tick;
             controlsReady = true;
+        }
+
+        protected override void OnSourceInitialized(EventArgs e)
+        {
+            base.OnSourceInitialized(e);
+            var source = (HwndSource)PresentationSource.FromVisual(this);
+            HwndSourceHook windowMessages = (IntPtr handle, int message, IntPtr wParam, IntPtr lParam, ref bool handled) =>
+            {
+                // Keep the window icon without opening its left-click system menu.
+                if (message == 0x00A1 && wParam.ToInt64() == 3) handled = true;
+                // WM_ENTERSIZEMOVE precedes moving/resizing, even with input focus intact.
+                if (message == 0x0231) CloseSuggestions();
+                return IntPtr.Zero;
+            };
+            source.AddHook(windowMessages);
+            Closed += (_, _) => { if (!source.IsDisposed) source.RemoveHook(windowMessages); };
         }
 
         private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -66,8 +86,37 @@ namespace Mdict.Wpf
             }
             catch (Exception ex)
             {
-                if (!closed) StatusText.Text = "设置加载失败：" + ex.Message;
+                if (!closed) ShowStatus("设置加载失败：" + ex.Message);
             }
+            if (!closed)
+            {
+                try
+                {
+                    string runtimeError = WebView.WebViewController.GetRuntimeError();
+                    if (runtimeError != null)
+                    {
+                        ShowStatus("请安装 Microsoft Edge WebView2 Runtime 后重试。");
+                        StatusText.ToolTip = runtimeError;
+                        RuntimeHelp.Visibility = Visibility.Visible;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ShowStatus("浏览器运行环境检测失败：" + ex.Message);
+                    StatusText.ToolTip = StatusText.Text;
+                }
+            }
+        }
+
+        private void RuntimeDownload_RequestNavigate(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
+        {
+            e.Handled = true;
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                    WebView.WebViewController.RuntimeDownloadUrl) { UseShellExecute = true });
+            }
+            catch (Exception ex) { ShowStatus("无法打开下载页面：" + ex.Message); }
         }
 
         private async void SettingsButton_Click(object sender, RoutedEventArgs e)
@@ -75,18 +124,25 @@ namespace Mdict.Wpf
             if (!browserReady || busy)
                 return;
             CloseSuggestions();
-            var dialog = new SettingsWindow(configuredPaths) { Owner = this };
-            if (dialog.ShowDialog() == true)
+            try { DictionarySettings.Initialize(settingsPath); }
+            catch (Exception ex)
+            {
+                ShowStatus("设置初始化失败：" + ex.Message);
+                StatusText.ToolTip = StatusText.Text;
+                return;
+            }
+            var dialog = new SettingsWindow(configuredPaths, settingsPath) { Owner = this };
+            dialog.ShowDialog();
+            if (!closed && dialog.HasChanges)
             {
                 try
                 {
                     var paths = dialog.ResultPaths.ToList();
-                    DictionarySettings.Save(settingsPath, paths);
                     await ApplyDictionaryPathsAsync(paths);
                 }
                 catch (Exception ex)
                 {
-                    if (!closed) StatusText.Text = "设置保存失败：" + ex.Message;
+                    if (!closed) ShowStatus("词典设置应用失败：" + ex.Message);
                 }
             }
             if (!closed) WordText.Focus();
@@ -98,6 +154,10 @@ namespace Mdict.Wpf
             section.Controller.EntryLookupRequested += key =>
             {
                 if (!closed && sections.Contains(section)) OnEntryLookupRequested(key);
+            };
+            section.Controller.TextSelectionRequested += (text, lookup) =>
+            {
+                if (!closed && sections.Contains(section)) OnTextSelectionRequested(text, lookup);
             };
             section.Controller.ScrollRequested += delta =>
             {
@@ -118,11 +178,40 @@ namespace Mdict.Wpf
             return section;
         }
 
+        private void ShowStatus(string text)
+        {
+            statusTimer.Stop();
+            StatusText.Text = text;
+            StatusText.ToolTip = null;
+            RuntimeHelp.Visibility = Visibility.Collapsed;
+            StatusPanel.Visibility = text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+            if (text.Length > 0) statusTimer.Start();
+        }
+
+        private async void OnTextSelectionRequested(string text, bool lookup)
+        {
+            string copyError = null;
+            try { Clipboard.SetText(text); }
+            catch (System.Runtime.InteropServices.ExternalException ex) { copyError = ex.Message; }
+            if (!lookup || busy)
+            {
+                ShowStatus(copyError == null ? "已复制所选文字。" : "复制失败：" + copyError);
+                return;
+            }
+            int version = configurationVersion;
+            await LookupAsync(text, true);
+            if (closed || version != configurationVersion) return;
+            string result = StatusText.Text;
+            if (copyError != null) ShowStatus("复制失败：" + copyError + "；" + result);
+            else ShowStatus(result.StartsWith("已加载：", StringComparison.Ordinal)
+                ? result.Replace("已加载：", "已复制并查询：") : "已复制；" + result);
+        }
+
         private async Task ApplyDictionaryPathsAsync(IEnumerable<string> paths)
         {
             SetBusy(true);
             int version = ++configurationVersion;
-            string word = displayedWord.Length > 0 ? displayedWord : WordText.Text.Trim();
+            string word = displayedWord;
             configuredPaths = paths.ToList();
             foreach (var section in sections) section.Dispose();
             sections.Clear();
@@ -134,7 +223,7 @@ namespace Mdict.Wpf
             history.Clear();
             historyIndex = -1;
             displayedWord = "";
-            StatusText.Text = "正在打开词典…";
+            ShowStatus("正在打开词典…");
             var openErrors = new List<string>();
             try
             {
@@ -156,9 +245,9 @@ namespace Mdict.Wpf
                     }
                 }
                 if (closed) return;
-                StatusText.Text = configuredPaths.Count == 0 ? "尚未设置词典。" :
-                    openErrors.Count > 0 ? "词典打开失败：" + string.Join("；", openErrors) : "词典已打开。";
-                if (word.Length > 0) await LookupAsync(word, false);
+                ShowStatus(configuredPaths.Count == 0 ? "尚未设置词典。" :
+                    openErrors.Count > 0 ? "词典打开失败：" + string.Join("；", openErrors) : "词典已打开。");
+                if (word.Length > 0 && configuredPaths.Count > 0) await LookupAsync(word, false);
             }
             finally
             {
@@ -293,7 +382,7 @@ namespace Mdict.Wpf
                     catch (Exception ex)
                     {
                         if (version == suggestionVersion && CanSuggest())
-                            StatusText.Text = "候选词查询失败：" + ex.Message;
+                            ShowStatus("候选词查询失败：" + ex.Message);
                         continue;
                     }
 
@@ -302,7 +391,7 @@ namespace Mdict.Wpf
                         !string.Equals(WordText.Text.Trim(), prefix, StringComparison.Ordinal))
                         continue;
 
-                    if (errors.Count > 0) StatusText.Text = "部分词典候选词查询失败：" + string.Join("；", errors);
+                    if (errors.Count > 0) ShowStatus("部分词典候选词查询失败：" + string.Join("；", errors));
                     HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     List<string> suggestions = new List<string>();
                     foreach (string key in keys)
@@ -400,11 +489,10 @@ namespace Mdict.Wpf
             KeyboardFocusChangedEventArgs e)
         {
             // Do not close in the mouse-down phase of a popup item click.
-            // Defer until focus/mouse target has settled.
+            // Defer until the candidate's preview mouse-down has been processed.
             Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
             {
-                if (controlsReady && !WordText.IsKeyboardFocused &&
-                    !SuggestionList.IsMouseOver)
+                if (controlsReady && !WordText.IsKeyboardFocused)
                     CloseSuggestions();
             }));
         }
@@ -477,17 +565,16 @@ namespace Mdict.Wpf
             StatusText.ToolTip = null;
             EmptyText.Visibility = Visibility.Collapsed;
             ResultsScroll.ScrollToTop();
+            CloseSuggestions();
             if (word.Length == 0)
             {
-                CloseSuggestions();
-                StatusText.Text = "请输入查询词。";
+                ShowStatus("请输入查询词。");
                 return;
             }
 
-            CloseSuggestions();
             if (manageBusy)
                 SetBusy(true);
-            StatusText.Text = "正在查询 " + word + "…";
+            ShowStatus("正在查询 " + word + "…");
             int version = configurationVersion;
             try
             {
@@ -510,15 +597,7 @@ namespace Mdict.Wpf
                     return entries;
                 });
                 if (closed || version != configurationVersion) return;
-                if (!results.Any(r => !string.IsNullOrWhiteSpace(r.Html)))
-                {
-                    if (!preserveInputOnFailure && previousWord.Length > 0)
-                        SetWordText(previousWord);
-                    string errors = string.Join("；", results.Where(r => r.Error != null)
-                        .Select(r => Path.GetFileNameWithoutExtension(r.Section.DictionaryPath) + "：" + r.Error));
-                    StatusText.Text = "未找到词条：" + word + (errors.Length > 0 ? "；" + errors : "");
-                    return;
-                }
+                int matched = 0;
                 int loaded = 0;
                 var displayErrors = new List<string>();
                 foreach (var result in results)
@@ -526,6 +605,7 @@ namespace Mdict.Wpf
                     if (result.Error != null)
                         displayErrors.Add(Path.GetFileNameWithoutExtension(result.Section.DictionaryPath) + "：" + result.Error);
                     if (!result.Section.IsAvailable || string.IsNullOrWhiteSpace(result.Html)) continue;
+                    matched++;
                     try
                     {
                         result.Section.PrepareResult();
@@ -545,29 +625,30 @@ namespace Mdict.Wpf
                 }
                 if (loaded == 0)
                 {
-                    if (!preserveInputOnFailure && previousWord.Length > 0)
-                        SetWordText(previousWord);
-                    StatusText.Text = "词条显示失败：" + word + "；" + string.Join("；", displayErrors);
+                    ShowStatus((matched == 0 ? "未找到词条：" : "词条显示失败：") + word +
+                        (displayErrors.Count > 0 ? "；" + string.Join("；", displayErrors) : ""));
                     return;
                 }
                 displayedWord = word;
+                RuntimeHelp.Visibility = Visibility.Collapsed;
                 SetWordText(word);
                 CommitHistory(word, requestedHistoryIndex);
                 ResultsScroll.ScrollToTop();
-                StatusText.Text = "已加载：" + word + "；命中 " + loaded + " / " + sections.Count + " 个词典" +
-                    (displayErrors.Count > 0 ? "；" + string.Join("；", displayErrors) : "");
+                ShowStatus("已加载：" + word + "；命中 " + loaded + " / " + sections.Count + " 个词典" +
+                    (displayErrors.Count > 0 ? "；" + string.Join("；", displayErrors) : ""));
                 StatusText.ToolTip = string.Join("\n", sections.Where(s => s.IsAvailable && s.Visibility == Visibility.Visible)
                     .Select(s => Path.GetFileNameWithoutExtension(s.DictionaryPath) + "：" + s.Controller.GetResourceSummary()));
             }
             catch (Exception ex)
             {
                 if (closed || version != configurationVersion) return;
-                if (!preserveInputOnFailure && previousWord.Length > 0)
-                    SetWordText(previousWord);
-                StatusText.Text = "查询失败：" + ex.Message;
+                ShowStatus("查询失败：" + ex.Message);
             }
             finally
             {
+                if (!closed && version == configurationVersion && displayedWord.Length == 0 &&
+                    !preserveInputOnFailure && previousWord.Length > 0)
+                    SetWordText(previousWord);
                 if (manageBusy && !closed && version == configurationVersion)
                     SetBusy(false);
             }
@@ -637,12 +718,12 @@ namespace Mdict.Wpf
                 await target.InitializeBrowserAsync();
                 int length = await target.Controller.ShowDiagnosticAsync();
                 target.ShowBrowser();
-                if (!closed) StatusText.Text = "WebView2 自测已加载；DOM 文本 " + length + " 字符。";
+                if (!closed) ShowStatus("WebView2 自测已加载；DOM 文本 " + length + " 字符。");
             }
             catch (Exception ex)
             {
                 if (target != null) target.Visibility = Visibility.Collapsed;
-                if (!closed) StatusText.Text = "WebView2 自测失败：" + ex.Message;
+                if (!closed) ShowStatus("WebView2 自测失败：" + ex.Message);
             }
             finally
             {
@@ -671,6 +752,7 @@ namespace Mdict.Wpf
         private void MainWindow_Closed(object sender, EventArgs e)
         {
             closed = true;
+            statusTimer.Stop();
             configurationVersion++;
             CloseSuggestions();
             foreach (var section in sections) section.Dispose();

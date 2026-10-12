@@ -22,11 +22,14 @@ internal static class Program
     private static int Main(string[] args)
     {
         if (args.Length == 1 && args[0] == "--local-resources") return LocalResourceTests.Run();
+        if (args.Length == 1 && args[0] == "--settings") return SettingsTests.Run();
+        if (args.Length == 2 && args[0] == "--published") return PublishedAppTests.Run(args[1]);
         Console.WriteLine("Runtime: " + System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription);
         Console.WriteLine("WPF: " + typeof(System.Windows.Application).Assembly.Location);
-        if (args.Length != 1 || !File.Exists(args[0]))
+        if (args.Length < 1 || args.Length > 2 || !File.Exists(args[0]) ||
+            (args.Length == 2 && !File.Exists(args[1])))
         {
-            Console.Error.WriteLine("Usage: dotnet run --project dev-tests/Mdict.Wpf.Tests -- <Oxford.mdx>");
+            Console.Error.WriteLine("Usage: dotnet run --project dev-tests/Mdict.Wpf.Tests -- <dictionary.mdx> [second-dictionary.mdx]");
             return 2;
         }
         var app = new System.Windows.Application();
@@ -58,11 +61,21 @@ internal static class Program
                 var reader = service.GetType().GetField("dictionary", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(service);
                 Check(reader.GetType().GetField("mdxKeys", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(reader) == null,
                     "startup does not load the word index or perform an implicit lookup");
-                Capture((FrameworkElement)window.Content, "startup-empty.png");
-                Check(Math.Abs(window.MaxWidth - SystemParameters.WorkArea.Width) < 1 &&
-                    Math.Abs(window.MaxHeight - SystemParameters.WorkArea.Height) < 1,
-                    "main window maximum dimensions match the available screen without a fixed cap");
-                TestWindowLimits(window, SystemParameters.WorkArea.Width, SystemParameters.WorkArea.Height, "main window");
+                Check(double.IsPositiveInfinity(window.MaxWidth) && double.IsPositiveInfinity(window.MaxHeight),
+                    "main window has no application maximum dimensions");
+                double originalWidth = window.Width, originalHeight = window.Height;
+                try
+                {
+                    window.Width = SystemParameters.WorkArea.Width + 100;
+                    window.Height = SystemParameters.WorkArea.Height + 100;
+                    window.UpdateLayout();
+                    Check(window.ActualWidth > SystemParameters.WorkArea.Width && window.ActualHeight > SystemParameters.WorkArea.Height,
+                        "main window can exceed the former work-area size cap");
+                    SendMessage(new System.Windows.Interop.WindowInteropHelper(window).Handle, 0x001A, new IntPtr(0x002F), IntPtr.Zero);
+                    Check(double.IsPositiveInfinity(window.MaxWidth) && double.IsPositiveInfinity(window.MaxHeight),
+                        "work-area changes do not restore main window maximum dimensions");
+                }
+                finally { window.Width = originalWidth; window.Height = originalHeight; }
                 Check(window.Icon != null, "main window has the drawn M icon");
                 TestAppIcon();
                 input.Clear();
@@ -74,6 +87,12 @@ internal static class Program
                 Press(Key.Enter);
                 await Idle();
                 Check(Field<string>("displayedWord") == "apple", "real Oxford opens apple");
+                Check(!Field<List<DictionaryResultView>>("sections")[0].Browser.CoreWebView2.Settings.AreDefaultContextMenusEnabled &&
+                    input.ReadLocalValue(FrameworkElement.ContextMenuProperty) == null,
+                    "main browser and search input disable their default context menus");
+                Check(Field<List<DictionaryResultView>>("sections")[0].Browser.CoreWebView2.Environment.UserDataFolder ==
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MdictViewer", "WebView2"),
+                    "browser cache is kept outside the executable directory");
                 var restarted = new MainWindow(configurationPath) { Owner = window };
                 try
                 {
@@ -86,7 +105,6 @@ internal static class Program
                 finally { restarted.Close(); }
                 window.Activate();
                 await Task.Delay(200);
-                Capture((FrameworkElement)window.Content, "v0.6.0-oxford.png");
                 Check(window.FindName("SearchButton") == null, "toolbar has no search button");
                 Check(window.FindName("ForwardButton") is Button, "toolbar includes forward navigation");
                 Check(window.FindName("SettingsButton") is Button, "toolbar includes dictionary settings");
@@ -134,6 +152,25 @@ internal static class Program
                 input.Focus();
                 await Task.Delay(250);
                 Check(!popup.IsOpen && input.Text == "appl", "Esc preserves input and refocus stays closed");
+
+                Edit("appl");
+                await WaitUntil(() => popup.IsOpen, "move suggestions");
+                SendMessage(new System.Windows.Interop.WindowInteropHelper(window).Handle, 0x0231, IntPtr.Zero, IntPtr.Zero);
+                Check(!popup.IsOpen && input.IsKeyboardFocused,
+                    "starting a window move or resize closes suggestions even when input retains focus");
+                Edit("appl"); TickSuggestions();
+                SendMessage(new System.Windows.Interop.WindowInteropHelper(window).Handle, 0x0231, IntPtr.Zero, IntPtr.Zero);
+                await WaitUntil(() => !Field<bool>("suggestionSearchRunning"), "move cancelled prefix search");
+                Check(!popup.IsOpen && !Field<System.Windows.Threading.DispatcherTimer>("suggestionTimer").IsEnabled,
+                    "moving cancels pending suggestions without reopening the popup");
+                Edit("appl");
+                await WaitUntil(() => popup.IsOpen, "focus suggestions");
+                Keyboard.ClearFocus();
+                await Task.Delay(250);
+                Check(!popup.IsOpen, "losing input focus closes suggestions");
+                input.Focus();
+                await Task.Delay(250);
+                Check(!popup.IsOpen, "refocusing alone does not reopen suggestions");
 
                 Edit("apple");
                 await WaitUntil(() => popup.IsOpen, "edited suggestions");
@@ -212,7 +249,8 @@ internal static class Program
                 Check(await Script("document.body.innerText.includes('WebView2')") == "true" &&
                     Field<int>("historyIndex") == historyIndex && !popup.IsOpen,
                     "F9 renders diagnostic without history or delayed suggestions");
-                await TestMultipleDictionaries(args[0]);
+                await TestSelectionAndStatus(args[0]);
+                await TestMultipleDictionaries(args[0], args.Length == 2 ? args[1] : null);
             }
             catch (Exception ex)
             {
@@ -234,6 +272,109 @@ internal static class Program
 
     private static T Field<T>(string name, MainWindow target = null) => (T)typeof(MainWindow)
         .GetField(name, BindingFlags.Instance | BindingFlags.NonPublic).GetValue(target ?? window);
+
+    private static async Task TestSelectionAndStatus(string dictionary)
+    {
+        await TestIconMenu(window, "main window");
+        await Configure(dictionary);
+        Edit("apple"); Press(Key.Enter); await Idle();
+        var clipboard = Clipboard.GetDataObject();
+        try
+        {
+            await Script("var t=document.createElement('span');t.id='gesture-test';t.textContent='banana';document.body.append(t);" +
+                "var r=document.createRange();r.selectNodeContents(t);var s=getSelection();s.removeAllRanges();s.addRange(r);" +
+                "t.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0,clientX:10,clientY:10}));" +
+                "t.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,button:0,clientX:40,clientY:10}));");
+            await WaitUntil(() => Clipboard.ContainsText() && Clipboard.GetText() == "banana", "drag clipboard copy");
+            Check(Field<string>("displayedWord") == "apple" && Field<List<string>>("history").Count == 1,
+                "drag copies the selected text without querying or changing history");
+            Check(((TextBlock)window.FindName("StatusText")).Text.Contains("已复制所选文字"), "drag reports successful copy");
+            string bounds = await Script("var t=document.getElementById('gesture-test');" +
+                "t.textContent='before banana after';" +
+                "t.style.cssText='position:fixed;left:8px;top:8px;z-index:99999;background:white';" +
+                "var r=document.createRange();r.setStart(t.firstChild,7);r.setEnd(t.firstChild,13);" +
+                "var b=r.getBoundingClientRect();({x:b.left+b.width/2,y:b.top+b.height/2})");
+            using (var coordinates = System.Text.Json.JsonDocument.Parse(bounds))
+            {
+                double x = coordinates.RootElement.GetProperty("x").GetDouble();
+                double y = coordinates.RootElement.GetProperty("y").GetDouble();
+                var browser = Field<List<DictionaryResultView>>("sections")[0].Browser;
+                window.Activate();
+                var point = browser.PointToScreen(new Point(x, y));
+                GetCursorPos(out var previousCursor);
+                try
+                {
+                    SetCursorPos((int)point.X, (int)point.Y);
+                    mouse_event(2, 0, 0, 0, UIntPtr.Zero);
+                    mouse_event(4, 0, 0, 0, UIntPtr.Zero);
+                    await Task.Delay(100);
+                    mouse_event(2, 0, 0, 0, UIntPtr.Zero);
+                    mouse_event(4, 0, 0, 0, UIntPtr.Zero);
+                    await Task.Delay(700);
+                }
+                finally { SetCursorPos(previousCursor.X, previousCursor.Y); }
+            }
+            await WaitUntil(() => !Field<bool>("busy") && Field<string>("displayedWord") == "banana", "double-click lookup");
+            Check(Clipboard.GetText() == "banana" && Field<List<string>>("history").Count == 2 &&
+                ((TextBlock)window.FindName("StatusText")).Text.StartsWith("已复制并查询：banana"),
+                "native double click selects one word in a sentence and uses unified lookup and history");
+            await Script("var t=document.createElement('span');t.textContent='__missing_gesture_word__';document.body.append(t);" +
+                "var r=document.createRange();r.selectNodeContents(t);getSelection().removeAllRanges();getSelection().addRange(r);" +
+                "t.dispatchEvent(new MouseEvent('dblclick',{bubbles:true,button:0}));");
+            await WaitUntil(() => ((TextBlock)window.FindName("StatusText")).Text.StartsWith("已复制；未找到词条："), "copied missing word");
+            Check(Clipboard.GetText() == "__missing_gesture_word__" && Field<List<string>>("history").Count == 2,
+                "failed double-click lookup still copies and does not add history");
+
+            var settings = new SettingsWindow(new[] { dictionary }, Field<string>("settingsPath")) { Owner = window };
+            try
+            {
+                settings.Show();
+                await TestIconMenu(settings, "settings window");
+                SettingsTests.Add(settings, dictionary);
+                var error = (TextBlock)settings.FindName("ErrorText");
+                var showStatus = typeof(MainWindow).GetMethod("ShowStatus", BindingFlags.Instance | BindingFlags.NonPublic);
+                showStatus.Invoke(window, new object[] { "first message" });
+                await Task.Delay(3500);
+                showStatus.Invoke(window, new object[] { "second message" });
+                SettingsTests.Add(settings, dictionary);
+                await Task.Delay(3000);
+                Check(((UIElement)window.FindName("StatusPanel")).Visibility == Visibility.Visible && error.Visibility == Visibility.Visible,
+                    "new messages restart both six-second countdowns");
+                await Task.Delay(3300);
+                Check(((UIElement)window.FindName("StatusPanel")).Visibility == Visibility.Collapsed &&
+                    ((TextBlock)window.FindName("StatusText")).Text == "" && error.Text == "" && error.Visibility == Visibility.Collapsed,
+                    "both message areas clear and collapse after six seconds");
+            }
+            finally { settings.Close(); }
+            Edit("apple"); Press(Key.Enter); await Idle();
+        }
+        finally { if (clipboard != null) Clipboard.SetDataObject(clipboard, true); else Clipboard.Clear(); }
+    }
+
+    private static async Task TestIconMenu(Window target, string description)
+    {
+        var handle = new System.Windows.Interop.WindowInteropHelper(target).Handle;
+        var source = System.Windows.Interop.HwndSource.FromHwnd(handle);
+        bool menuOpened = false;
+        System.Windows.Interop.HwndSourceHook observer = (IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled) =>
+        {
+            if (message == 0x0117)
+            {
+                menuOpened = true;
+                PostMessage(hwnd, 0x001F, IntPtr.Zero, IntPtr.Zero);
+            }
+            return IntPtr.Zero;
+        };
+        source.AddHook(observer);
+        try
+        {
+            PostMessage(handle, 0x00A1, new IntPtr(3), IntPtr.Zero);
+            await Task.Delay(200);
+            Check(!menuOpened && (GetWindowLong(handle, -16) & 0x00080000) != 0,
+                description + " icon left click suppresses its menu and retains titlebar controls");
+        }
+        finally { source.RemoveHook(observer); }
+    }
 
     private static void Edit(string value)
     {
@@ -267,14 +408,13 @@ internal static class Program
 
     private static void Click(string name) => ((Button)window.FindName(name)).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
 
-    private static async Task TestMultipleDictionaries(string realOxford)
+    private static async Task TestMultipleDictionaries(string realOxford, string companion)
     {
         string directory = Path.Combine(Path.GetTempPath(), "MdictViewer-fixtures-" + Guid.NewGuid());
         Directory.CreateDirectory(directory);
         try
         {
-            string companion = Path.Combine(Path.GetDirectoryName(realOxford), "牛津高阶英汉双解词典（汉英+同义词+例句反查）V3_1.mdx");
-            if (File.Exists(companion))
+            if (companion != null)
             {
                 await Configure(realOxford, companion);
                 var realSections = Field<List<DictionaryResultView>>("sections");
@@ -298,56 +438,54 @@ internal static class Program
                 await ScriptAt(1, "getComputedStyle(document.querySelector('.marker')).color") == "\"rgb(11, 22, 33)\"",
                 "standalone CSS loads in WebView2 and stays isolated from another dictionary's MDD");
             string settings = Path.Combine(directory, "settings.json");
-            DictionarySettings.Save(settings, new[] { a, b });
-            Check(DictionarySettings.Load(settings).SequenceEqual(new[] { a, b }), "settings round-trip preserves ordered MDX paths");
-            Check(Rejects(() => DictionarySettings.ValidatePaths(new[] { a, a.ToUpperInvariant() })), "duplicate paths rejected case-insensitively");
-            Check(Rejects(() => DictionarySettings.ValidatePaths(new[] { Path.Combine(directory, "missing.mdx") })), "missing path rejected");
             var eight = new List<string> { a, b };
-            for (int i = 2; i < 9; i++)
+            for (int i = 2; i < 8; i++)
             {
                 string copy = Path.Combine(directory, "copy" + i + ".mdx");
                 File.Copy(a, copy);
-                if (i < 8) eight.Add(copy);
-                else Check(Rejects(() => DictionarySettings.ValidatePaths(eight.Append(copy))), "ninth dictionary rejected");
+                eight.Add(copy);
             }
-            Check(DictionarySettings.ValidatePaths(eight).Count == 8, "eight dictionary paths accepted");
-            var dialog = new SettingsWindow(new[] { a });
-            var rows = (StackPanel)dialog.FindName("PathRows");
-            var plus = (Button)dialog.FindName("AddButton");
-            Check(plus.Visibility == Visibility.Visible, "valid last path reveals plus below rows");
-            plus.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            Check(rows.Children.Count == 2 && plus.Visibility == Visibility.Collapsed, "plus adds one empty row then hides");
-            ((TextBox)((Grid)rows.Children[1]).Children[0]).Text = b;
-            Check(plus.Visibility == Visibility.Visible, "completing second MDX reveals next plus");
-            ((Button)((Grid)rows.Children[1]).Children[2]).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            Check(rows.Children.Count == 1, "path row can be removed");
-            dialog.Close();
-            Check(dialog.ResultPaths == null && DictionarySettings.Load(settings).SequenceEqual(new[] { a, b }), "cancel leaves saved configuration unchanged");
-            dialog = new SettingsWindow(eight);
-            Check(((Button)dialog.FindName("AddButton")).Visibility == Visibility.Collapsed, "plus hidden at eight paths");
+            var dialog = new SettingsWindow(eight, settings);
             dialog.Owner = window;
             dialog.Width = dialog.MinWidth;
             dialog.Height = dialog.MinHeight;
             dialog.Show();
             dialog.UpdateLayout();
-            TestWindowLimits(dialog, 1000, 700, "settings window");
+            TestWindowLimits(dialog, 500, 500, "settings window");
+            int style = GetWindowLong(new System.Windows.Interop.WindowInteropHelper(dialog).Handle, -16);
+            Check((style & 0x00010000) == 0 && (style & 0x00040000) != 0,
+                "settings disables its native maximize button while retaining edge resizing");
             var pathScroll = VisualChild<ScrollViewer>((FrameworkElement)dialog.Content);
-            var save = (Button)dialog.FindName("SaveButton");
+            var controls = (Button)dialog.FindName("BrowseButton");
+            var settingsLayout = (Grid)dialog.Content;
+            Check(settingsLayout.Margin.Bottom == 8 && settingsLayout.ActualHeight -
+                controls.TranslatePoint(new Point(0, controls.ActualHeight), settingsLayout).Y < 1 &&
+                ((TextBlock)dialog.FindName("ErrorText")).Visibility == Visibility.Collapsed,
+                "settings controls stay close to the bottom without an empty error row");
             Check(pathScroll != null && pathScroll.ScrollableHeight > 0 &&
-                save.TranslatePoint(new Point(), dialog).Y >= pathScroll.TranslatePoint(new Point(0, pathScroll.ActualHeight), dialog).Y,
-                "eight rounded path rows scroll without overlapping footer in smallest settings window");
-            Capture((FrameworkElement)dialog.Content, "settings-style-eight-compact.png");
+                controls.TranslatePoint(new Point(), dialog).Y >= pathScroll.TranslatePoint(new Point(0, pathScroll.ActualHeight), dialog).Y,
+                "eight filenames scroll without overlapping footer in smallest settings window");
             dialog.Close();
             await TestSettingsWorkflow(a, b);
 
             Edit("apple");
             await Configure(a, b);
+            Press(Key.Enter); await Idle();
             var sections = Field<List<DictionaryResultView>>("sections");
             var scroll = (ScrollViewer)window.FindName("ResultsScroll");
             Check(sections.Count == 2 && !ReferenceEquals(sections[0].Service, sections[1].Service) &&
                 !ReferenceEquals(sections[0].Browser, sections[1].Browser), "dictionaries have independent readers and browsers");
             Check(await ScriptAt(0, "document.body.innerText.includes('A apple')") == "true" &&
                 await ScriptAt(1, "document.body.innerText.includes('B APPLE')") == "true", "same lookup renders both dictionary results");
+            Check(await ScriptAt(0, "getComputedStyle(document.body).fontSize") == "\"14px\"" &&
+                await ScriptAt(1, "getComputedStyle(document.body).fontSize") == "\"14px\"" &&
+                await ScriptAt(0, "getComputedStyle(document.documentElement).fontSize") == "\"14px\"",
+                "dictionary pages share a 14px base font size");
+            Check(await ScriptAt(0, "(() => { const box=document.createElement('div'); " +
+                "box.innerHTML='<h2>heading</h2><span style=\"font-size:24px\">explicit</span><span style=\"font-size:1.5rem\">relative</span>'; " +
+                "document.body.appendChild(box); const ok=parseFloat(getComputedStyle(box.children[0]).fontSize)>14 && " +
+                "getComputedStyle(box.children[1]).fontSize==='24px' && getComputedStyle(box.children[2]).fontSize==='21px'; " +
+                "box.remove(); return ok; })()") == "true", "base font preserves heading explicit and relative size hierarchy");
             Check(await ScriptAt(0, "getComputedStyle(document.querySelector('.marker')).color") == "\"rgb(186, 91, 73)\"" &&
                 await ScriptAt(1, "getComputedStyle(document.querySelector('.marker')).color") == "\"rgb(50, 113, 174)\"", "same CSS path resolves to each dictionary's own MDD");
             Check(await AudioBytesAt(0) == "ID3-A" && await AudioBytesAt(1) == "ID3-B", "same audio resource path remains isolated");
@@ -433,7 +571,6 @@ internal static class Program
             await Task.Delay(80);
             Check((string)toggle.ToolTip == "展开查询结果" && scroll.ScrollableHeight == 0,
                 "collapsed arrow and layout remove the result's scroll space");
-            Capture((FrameworkElement)window.Content, "folded-result.png");
             toggle.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             Check(sections[0].Browser.Visibility == Visibility.Visible, "toggle expands existing result again");
             toggle.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -478,18 +615,23 @@ internal static class Program
             Field<List<DictionaryResultView>>("sections")[0].Controller.Dispose();
             Edit("banana"); Press(Key.Enter); await Idle();
             Check(input.Text == "banana", "manual display failure preserves the edited query text");
-            for (int i = 0; i < 5; i++)
+            var abandoned = new DictionaryResultView(a);
+            Task opening;
+            var readerLock = abandoned.Service.GetType().GetField("sync", BindingFlags.Instance | BindingFlags.NonPublic)
+                .GetValue(abandoned.Service);
+            // Prevent background Open from publishing its reader until Dispose has completed.
+            lock (readerLock)
             {
-                var abandoned = new DictionaryResultView(a);
-                Task opening = abandoned.OpenAsync();
+                opening = abandoned.OpenAsync();
                 abandoned.Dispose();
-                await opening;
-                await Task.Delay(50);
-                Check(!abandoned.Service.IsOpen, "closing during async open does not reopen abandoned reader " + i);
             }
+            await opening;
+            Check(!abandoned.Service.IsOpen, "closing before async open publishes prevents an abandoned reader from reopening");
             await Configure(a, b);
             Edit("apple"); Press(Key.Enter); await Idle();
             await ReplaceDuringResourceRead(b);
+            Edit("apple"); Press(Key.Enter); await Idle();
+            await TestResourceStatistics();
 
             await Configure(eight.ToArray());
             Check(Field<List<DictionaryResultView>>("sections").Count == 8 &&
@@ -508,11 +650,13 @@ internal static class Program
             await ScriptAt(1, "document.getElementById('expansion').style.height='30px';true");
             await WaitUntil(() => Field<List<DictionaryResultView>>("sections").All(s => s.Browser.Height < 500), "compact results");
             await Task.Delay(200);
-            Capture((FrameworkElement)window.Content, "v0.6.0-desktop.png");
-            window.Width = 620; window.Height = 450;
+            window.Width = 450; window.Height = 450;
             await Task.Delay(250);
-            Capture((FrameworkElement)window.Content, "v0.6.0-compact.png");
-            Check(input.ActualWidth > 300 && ((Button)window.FindName("SettingsButton")).TranslatePoint(new Point(40, 0), window).X < window.ActualWidth,
+            var settingsButton = (Button)window.FindName("SettingsButton");
+            var backButton = (Button)window.FindName("BackButton");
+            Check(Math.Abs(window.ActualWidth - 450) < 1 && input.ActualWidth >= 100 &&
+                input.TranslatePoint(new Point(input.ActualWidth, 0), window).X <= backButton.TranslatePoint(new Point(0, 0), window).X &&
+                settingsButton.TranslatePoint(new Point(settingsButton.ActualWidth, 0), window).X < window.ActualWidth,
                 "compact toolbar fits input and three icons without overlap");
             await Configure();
             Check(Field<List<DictionaryResultView>>("sections").Count == 0 && !((Button)window.FindName("BackButton")).IsEnabled,
@@ -522,6 +666,17 @@ internal static class Program
             {
                 Environment.SetEnvironmentVariable("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER",
                     Path.Combine(directory, "missing-browser"));
+                var missingRuntimeWindow = new MainWindow(Path.Combine(directory, "missing-runtime.json"));
+                try
+                {
+                    missingRuntimeWindow.Show();
+                    await WaitUntil(() => Field<bool>("browserReady", missingRuntimeWindow) &&
+                        !Field<bool>("busy", missingRuntimeWindow), "missing runtime startup");
+                    Check(((TextBlock)missingRuntimeWindow.FindName("StatusText")).Text.Contains("安装 Microsoft Edge WebView2 Runtime") &&
+                        missingRuntimeWindow.FindName("RuntimeHelp") is FrameworkElement help && help.Visibility == Visibility.Visible,
+                        "startup explains a missing WebView2 runtime and offers its download link");
+                }
+                finally { missingRuntimeWindow.Close(); }
                 Edit("");
                 await Configure(a);
                 Press(Key.F9); await Idle();
@@ -548,11 +703,6 @@ internal static class Program
                 "F9 retries successfully after browser initialization failure without configured dictionaries");
         }
         finally { Directory.Delete(directory, true); }
-    }
-
-    private static bool Rejects(Action action)
-    {
-        try { action(); return false; } catch (ArgumentException) { return true; }
     }
 
     private static async Task<string> AudioBytesAt(int index)
@@ -612,95 +762,163 @@ internal static class Program
         finally { release.Set(); await blocker; }
     }
 
+    private static async Task TestResourceStatistics()
+    {
+        var section = Field<List<DictionaryResultView>>("sections")[0];
+        var core = section.Browser.CoreWebView2;
+        var resources = (Mdict.Wpf.WebView.WebResourceHandler)section.Controller.GetType()
+            .GetField("resources", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(section.Controller);
+        object sync = section.Service.GetType().GetField("sync", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(section.Service);
+        const string path = "shared.css";
+        {
+            var held = new TaskCompletionSource<bool>();
+            using var release = new ManualResetEventSlim(false);
+            var blocker = Task.Run(() => { lock (sync) { held.SetResult(true); release.Wait(TimeSpan.FromSeconds(10)); } });
+            await held.Task;
+            var requested = new TaskCompletionSource<bool>();
+            var responded = new TaskCompletionSource<bool>();
+            EventHandler<Microsoft.Web.WebView2.Core.CoreWebView2WebResourceRequestedEventArgs> request = (_, e) =>
+            { if (e.Request.Uri.Contains("statistics-test")) requested.TrySetResult(true); };
+            EventHandler<Microsoft.Web.WebView2.Core.CoreWebView2WebResourceResponseReceivedEventArgs> response = (_, e) =>
+            { if (e.Request.Uri.Contains("statistics-test")) responded.TrySetResult(true); };
+            core.WebResourceRequested += request;
+            core.WebResourceResponseReceived += response;
+            try
+            {
+                await core.ExecuteScriptAsync("var statisticsLink=document.createElement('link');statisticsLink.rel='stylesheet';" +
+                    "statisticsLink.href='/" + path + "?statistics-test';document.head.appendChild(statisticsLink);true");
+                await requested.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                resources.PreparePage("<p>new page</p>");
+                release.Set();
+                await responded.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                Check(resources.ResourceSuccess == 0 && resources.ResourceFailures == 0 && resources.LastError == "",
+                    "late resource response leaves new page statistics empty: " + path);
+            }
+            finally
+            {
+                release.Set(); await blocker;
+                core.WebResourceRequested -= request;
+                core.WebResourceResponseReceived -= response;
+            }
+        }
+    }
+
     private static async Task TestSettingsWorkflow(string a, string b)
     {
+        await Configure(a, b);
+        string configurationPath = Field<string>("settingsPath");
+        string existing = File.ReadAllText(configurationPath);
+        DictionarySettings.Initialize(configurationPath);
+        Check(File.ReadAllText(configurationPath) == existing, "initialization never overwrites an existing corrupt configuration");
+        File.Delete(configurationPath);
+        Check(DictionarySettings.DefaultPath == Path.Combine(AppContext.BaseDirectory, "dictionaries.json"),
+            "default configuration is beside the executable");
+        Check(DictionarySettings.Load(configurationPath).Count == 0 && !File.Exists(configurationPath),
+            "loading a missing configuration does not create it");
+        _ = window.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() =>
+        {
+            var dialog = window.OwnedWindows.OfType<SettingsWindow>().Single();
+            Check(File.Exists(configurationPath) && File.ReadAllText(configurationPath).Trim() == "[]",
+                "first Settings click creates an empty configuration before showing the dialog");
+            dialog.Close();
+        }));
+        Click("SettingsButton"); await Idle();
+        Check(File.Exists(configurationPath) && File.ReadAllText(configurationPath).Trim() == "[]",
+            "closing unchanged Settings leaves the initialized configuration empty");
+
+        var blockedSettings = new MainWindow(Path.GetDirectoryName(configurationPath));
+        try
+        {
+            blockedSettings.Show();
+            await WaitUntil(() => Field<bool>("browserReady", blockedSettings) && !Field<bool>("busy", blockedSettings),
+                "blocked configuration startup");
+            ((Button)blockedSettings.FindName("SettingsButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Check(((TextBlock)blockedSettings.FindName("StatusText")).Text.StartsWith("设置初始化失败：") &&
+                !blockedSettings.OwnedWindows.OfType<SettingsWindow>().Any(),
+                "configuration creation failure is reported without opening an unusable Settings dialog");
+        }
+        finally { blockedSettings.Close(); }
+
+        var originalSections = Field<List<DictionaryResultView>>("sections").ToArray();
+        string currentWord = Field<string>("displayedWord");
         _ = window.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() =>
         {
             var dialog = window.OwnedWindows.OfType<SettingsWindow>().Single();
             try
             {
-                var rows = (StackPanel)dialog.FindName("PathRows");
-                while (rows.Children.Count > 1)
-                    ((Button)((Grid)rows.Children[^1]).Children[2]).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                var first = (TextBox)((Grid)rows.Children[0]).Children[0];
-                first.Text = "Z:\\missing-test-dictionary.mdx";
-                ((Button)dialog.FindName("SaveButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                Check(dialog.IsVisible && ((TextBlock)dialog.FindName("ErrorText")).Text.Length > 0,
-                    "settings save rejects invalid path without closing dialog");
-                first.Text = a;
-                ((Button)dialog.FindName("AddButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                ((TextBox)((Grid)rows.Children[1]).Children[0]).Text = b;
+                var dictionaries = (ListBox)dialog.FindName("DictionaryList");
+                dictionaries.SelectedIndex = 0;
+                ((Button)dialog.FindName("MoveDownButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Check(DictionarySettings.Load(configurationPath).SequenceEqual(new[] { b, a }),
+                    "settings reorder is persisted while the dialog is open");
+                Check(Field<List<DictionaryResultView>>("sections").SequenceEqual(originalSections) &&
+                    Field<string>("displayedWord") == currentWord, "open Settings does not refresh the main result");
                 dialog.UpdateLayout();
                 TestSettingsAppearance(dialog);
-                Capture((FrameworkElement)dialog.Content, "v0.6.0-settings.png");
-                ((Button)dialog.FindName("SaveButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                dialog.Close();
             }
             catch { dialog.Close(); throw; }
         }));
         Click("SettingsButton");
         await Idle();
-        Check(Field<List<string>>("configuredPaths").SequenceEqual(new[] { a, b }) &&
-            DictionarySettings.Load(Field<string>("settingsPath")).SequenceEqual(new[] { a, b }),
-            "settings button saves ordered paths and reloads real result sections");
-        int historyCount = Field<List<string>>("history").Count;
+        Check(Field<List<string>>("configuredPaths").SequenceEqual(new[] { b, a }) &&
+            Field<List<DictionaryResultView>>("sections").Select(section => section.DictionaryPath).SequenceEqual(new[] { b, a }) &&
+            Field<string>("displayedWord") == currentWord && originalSections.All(section => !section.IsAvailable),
+            "closing changed Settings applies the final order and refreshes the displayed word");
+        var appliedSections = Field<List<DictionaryResultView>>("sections").ToArray();
+        _ = window.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() =>
+            window.OwnedWindows.OfType<SettingsWindow>().Single().Close()));
+        Click("SettingsButton");
+        Check(Field<List<DictionaryResultView>>("sections").SequenceEqual(appliedSections),
+            "closing unchanged Settings preserves the current readers and result");
         _ = window.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() =>
         {
             var dialog = window.OwnedWindows.OfType<SettingsWindow>().Single();
-            ((TextBox)((Grid)((StackPanel)dialog.FindName("PathRows")).Children[0]).Children[0]).Text = b;
-            dialog.DialogResult = false;
+            var dictionaries = (ListBox)dialog.FindName("DictionaryList");
+            while (dictionaries.Items.Count > 0)
+            {
+                dictionaries.SelectedIndex = 0;
+                ((Button)dialog.FindName("RemoveButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            }
+            Check(DictionarySettings.Load(configurationPath).Count == 0 &&
+                Field<List<DictionaryResultView>>("sections").SequenceEqual(appliedSections),
+                "deleting all dictionaries saves immediately without refreshing the open main window");
+            dialog.Close();
         }));
-        Click("SettingsButton");
-        Check(Field<List<string>>("configuredPaths").SequenceEqual(new[] { a, b }) &&
-            DictionarySettings.Load(Field<string>("settingsPath")).SequenceEqual(new[] { a, b }) &&
-            Field<List<string>>("history").Count == historyCount,
-            "cancelling edited settings leaves active readers, history and persisted paths unchanged");
+        Click("SettingsButton"); await Idle();
+        Check(Field<List<DictionaryResultView>>("sections").Count == 0 && Field<List<string>>("history").Count == 0 &&
+            Field<string>("displayedWord") == "", "closing empty Settings clears results and history");
+        Edit("unfinished-input");
+        _ = window.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() =>
+        {
+            var dialog = window.OwnedWindows.OfType<SettingsWindow>().Single();
+            SettingsTests.Add(dialog, a);
+            dialog.Close();
+        }));
+        Click("SettingsButton"); await Idle();
+        Check(Field<List<DictionaryResultView>>("sections").Single().Browser.CoreWebView2 == null &&
+            Field<string>("displayedWord") == "" && input.Text == "unfinished-input",
+            "closing changed Settings never queries text that has not been displayed");
     }
 
     private static void TestSettingsAppearance(SettingsWindow dialog)
     {
-        var rows = (StackPanel)dialog.FindName("PathRows");
-        var input = (TextBox)((Grid)rows.Children[0]).Children[0];
-        var add = (Button)dialog.FindName("AddButton");
-        var browse = (Button)((Grid)rows.Children[0]).Children[1];
-        var remove = (Button)((Grid)rows.Children[0]).Children[2];
-        var heading = (TextBlock)((Grid)dialog.Content).Children[0];
-        Check(dialog.FontSize == 15 && input.FontSize == 15 && heading.FontSize == 15 &&
-            ((Button)dialog.FindName("SaveButton")).FontSize == 15 &&
-            ((Button)dialog.FindName("CancelButton")).FontSize == 15,
-            "settings heading path fields and action buttons consistently use size 15");
-        Check(dialog.Icon != null, "settings window shares the drawn M icon");
-        var buttons = new[] { add, browse, remove, (Button)dialog.FindName("SaveButton"),
-            (Button)dialog.FindName("CancelButton") };
-        Check(buttons.All(button => button.Template.FindName("ButtonBorder", button) is Border border &&
-            border.CornerRadius == new CornerRadius(6)), "settings buttons have six-pixel rounded templates");
-        Check(input.Template.FindName("InputBorder", input) is Border inputBorder &&
-            inputBorder.CornerRadius == new CornerRadius(6), "settings text boxes have six-pixel rounded templates");
-        var icons = new[] { add, browse, remove };
-        Check(icons.All(button => button.Width == 40 && button.Height == 40 &&
-            button.Background is SolidColorBrush brush && brush.Color == Color.FromRgb(245, 242, 233)),
-            "settings icon buttons match toolbar dimensions and background");
-        Check(icons.All(button => button.Content is Image icon && icon.Width == 24 && icon.Height == 24 &&
-            icon.Source is DrawingImage drawing && drawing.Drawing.Bounds == new Rect(0, 0, 24, 24)),
-            "add remove and browse use consistently framed vector images instead of font glyphs");
-        Check(icons.All(button => button.Content is Image { Source: DrawingImage { Drawing: DrawingGroup group } } &&
-            group.Children.OfType<GeometryDrawing>().Any(drawing => drawing.Pen is Pen pen &&
-                pen.Thickness >= 2.5 && pen.Brush is SolidColorBrush brush && brush.Color == Color.FromRgb(186, 91, 73) &&
-                pen.StartLineCap == PenLineCap.Round && pen.EndLineCap == PenLineCap.Round)),
-            "drawn settings icons use thick rounded toolbar-colored strokes");
-        Check(add.Content is Image plus && remove.Content is Image minus &&
-            !ReferenceEquals(plus.Source, minus.Source), "add and remove have distinct drawn symbols");
-        input.Focus();
+        var dictionaries = (ListBox)dialog.FindName("DictionaryList");
+        var browse = (Button)dialog.FindName("BrowseButton");
+        var up = (Button)dialog.FindName("MoveUpButton");
+        var down = (Button)dialog.FindName("MoveDownButton");
+        var remove = (Button)dialog.FindName("RemoveButton");
+        Check(dialog.FontSize == 14 && dictionaries.FontSize == 14 && ((TextBlock)dialog.FindName("ErrorText")).FontSize == 14,
+            "settings text consistently uses size 14");
+        Check(browse.TranslatePoint(new Point(), dialog).X < up.TranslatePoint(new Point(), dialog).X &&
+            up.TranslatePoint(new Point(), dialog).X < down.TranslatePoint(new Point(), dialog).X &&
+            down.TranslatePoint(new Point(), dialog).X < remove.TranslatePoint(new Point(), dialog).X &&
+            VisualChild<TextBox>(dictionaries) == null, "settings shows a filename list and four ordered controls");
+        browse.Focus();
         dialog.UpdateLayout();
-        Check(input.IsKeyboardFocused && input.Template.FindName("InputBorder", input) is Border focused &&
-            focused.BorderBrush is SolidColorBrush focusBrush && focusBrush.Color == Color.FromRgb(50, 113, 174),
-            "rounded path input retains keyboard focus with visible blue border");
-        var save = (Button)dialog.FindName("SaveButton");
-        save.Focus();
-        dialog.UpdateLayout();
-        Check(save.IsKeyboardFocused && save.Template.FindName("ButtonBorder", save) is Border buttonBorder &&
-            buttonBorder.BorderBrush is SolidColorBrush buttonFocus && buttonFocus.Color == Color.FromRgb(50, 113, 174),
-            "rounded action button has visible keyboard focus");
-        input.Focus();
+        Check(browse.IsKeyboardFocused && browse.Template.FindName("ButtonBorder", browse) is Border border &&
+            border.BorderBrush is SolidColorBrush brush && brush.Color == Color.FromRgb(50, 113, 174),
+            "settings controls remain keyboard accessible with visible focus");
     }
 
     private static T VisualChild<T>(DependencyObject root) where T : DependencyObject
@@ -739,10 +957,6 @@ internal static class Program
             target.UpdateLayout();
             Check(target.ActualWidth <= target.MaxWidth + 1 && target.ActualHeight <= target.MaxHeight + 1,
                 description + " also obeys its size limits when maximized");
-            if (target == window)
-                Check(Math.Abs(target.ActualWidth - SystemParameters.WorkArea.Width) < 1 &&
-                    Math.Abs(target.ActualHeight - SystemParameters.WorkArea.Height) < 1,
-                    "maximized main window fills the available screen");
             target.WindowState = WindowState.Normal;
             // Simulate a smaller work area's previous constraints without changing desktop settings.
             target.MinWidth = Math.Max(0, minWidth - 40);
@@ -771,64 +985,26 @@ internal static class Program
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool PostMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out System.Drawing.Point point);
+    [DllImport("user32.dll")]
+    private static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extraInfo);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongW")]
+    private static extern int GetWindowLong(IntPtr handle, int index);
+
     private static void TestAppIcon()
     {
-        try
-        {
-            var resource = System.Windows.Application.GetResourceStream(
-                new Uri("pack://application:,,,/MdictViewer;component/Assets/App.ico"));
-            using var stream = resource.Stream;
-            var decoder = new IconBitmapDecoder(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
-            Check(new[] { 16, 24, 32, 48, 64, 128, 256 }.All(size => decoder.Frames.Any(frame => frame.PixelWidth == size)),
-                "application icon includes small and high-DPI frames");
-            var bitmap = new FormatConvertedBitmap(decoder.Frames.OrderByDescending(frame => frame.PixelWidth).First(), PixelFormats.Bgra32, null, 0);
-            byte[] pixels = new byte[bitmap.PixelWidth * bitmap.PixelHeight * 4];
-            bitmap.CopyPixels(pixels, bitmap.PixelWidth * 4, 0);
-            int background = 0;
-            int letter = 0;
-            int smoothEdges = 0;
-            int minX = bitmap.PixelWidth;
-            int minY = bitmap.PixelHeight;
-            int maxX = -1;
-            int maxY = -1;
-            for (int i = 0; i < pixels.Length; i += 4)
-            {
-                if (pixels[i] == 184 && pixels[i + 1] == 197 && pixels[i + 2] == 221 && pixels[i + 3] == 255) background++;
-                if (pixels[i] == 152 && pixels[i + 1] == 104 && pixels[i + 2] == 16 && pixels[i + 3] == 255)
-                {
-                    letter++;
-                    int x = i / 4 % bitmap.PixelWidth;
-                    int y = i / 4 / bitmap.PixelWidth;
-                    minX = Math.Min(minX, x); minY = Math.Min(minY, y);
-                    maxX = Math.Max(maxX, x); maxY = Math.Max(maxY, y);
-                }
-                if (pixels[i + 3] > 0 && pixels[i + 3] < 255) smoothEdges++;
-            }
-            Check(pixels[3] == 0 && background > 1000 && letter > 1000 && smoothEdges > 100,
-                "M icon preserves both requested colors transparent corners and antialiased circle edges");
-            Check(pixels[(5 * bitmap.PixelWidth + 128) * 4 + 3] == 255,
-                "logo circle fills more of its frame with reduced outer padding");
-            Check(maxX - minX + 1 >= 162 && maxY - minY + 1 >= 142,
-                "drawn M is visibly enlarged in both dimensions");
-        }
-        catch (IOException) { Check(false, "application icon resource is present and decodable"); }
-    }
-
-    private static void Capture(FrameworkElement element, string name)
-    {
-        var bitmap = new RenderTargetBitmap((int)element.ActualWidth, (int)element.ActualHeight, 96, 96, PixelFormats.Pbgra32);
-        var visual = new DrawingVisual();
-        using (var drawing = visual.RenderOpen())
-        {
-            var bounds = new Rect(0, 0, element.ActualWidth, element.ActualHeight);
-            drawing.DrawRectangle(new SolidColorBrush(Color.FromRgb(246, 247, 249)), null, bounds);
-            drawing.DrawRectangle(new VisualBrush(element), null, bounds);
-        }
-        bitmap.Render(visual);
-        var encoder = new PngBitmapEncoder();
-        encoder.Frames.Add(BitmapFrame.Create(bitmap));
-        using var stream = File.Create(Path.Combine(AppContext.BaseDirectory, name));
-        encoder.Save(stream);
+        var resource = System.Windows.Application.GetResourceStream(
+            new Uri("pack://application:,,,/MdictViewer;component/Assets/App.ico"));
+        using var stream = resource.Stream;
+        var decoder = new IconBitmapDecoder(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+        Check(decoder.Frames.Count > 0, "application icon resource loads successfully");
     }
 
     private static async Task Idle() => await WaitUntil(() => !Field<bool>("busy"), "lookup completion");

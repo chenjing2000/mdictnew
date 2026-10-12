@@ -18,6 +18,8 @@ namespace Mdict.Wpf
                 var source = (HwndSource)PresentationSource.FromVisual(window);
                 HwndSourceHook workAreaChanged = (IntPtr handle, int message, IntPtr wParam, IntPtr lParam, ref bool handled) =>
                 {
+                    // WM_NCLBUTTONDOWN / HTSYSMENU: keep the icon, suppress its click menu.
+                    if (message == 0x00A1 && wParam.ToInt64() == 3) handled = true;
                     // WM_SETTINGCHANGE / WM_DISPLAYCHANGE also cover taskbar and display changes.
                     if (message == 0x001A || message == 0x007E) Update(window, maximum, minimum);
                     return IntPtr.Zero;

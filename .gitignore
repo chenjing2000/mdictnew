@@ -15,6 +15,8 @@
 # Dictionary files are not included in the source repository
 *.[mM][dD][xX]
 *.[mM][dD][dD]
+# EXE-side user configuration is local, including copies used during development
+dictionaries.json
 
 # WebView2 profiles, generated test logs and screenshots
 **/*.WebView2/

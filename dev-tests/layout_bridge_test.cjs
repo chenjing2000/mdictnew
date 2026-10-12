@@ -67,6 +67,9 @@ check('CSS-only resize after host feedback', () => {
 check('CSS-only collapse coinciding with viewport feedback is not lost', () => {
     const f = fixture(500); f.resize(20, 900); assert.equal(f.window.innerHeight, 36);
 });
+check('CSS-only growth coinciding with external viewport resize is not lost', () => {
+    const f = fixture(500); f.resize(700, 550); assert.equal(f.window.innerHeight, 716);
+});
 for (const factor of [1, 2, 50]) {
     check('viewport-relative factor ' + factor + ' settles without unbounded growth', () => {
         const f = fixture(h => h * factor);

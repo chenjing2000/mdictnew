@@ -46,12 +46,18 @@ public class KeySectionInfo
 
     public KeyEntry FindExact(string word)
     {
+        int index = FindExactIndex(word);
+        return index < 0 ? null : AllEntries[index];
+    }
+
+    public int FindExactIndex(string word)
+    {
         if (!AllKeysLoaded || word == null)
-            return null;
+            return -1;
         int index;
         if (firstPosition.TryGetValue(word, out index))
-            return AllEntries[index];
-        return null;
+            return index;
+        return -1;
     }
 
     public List<KeyEntry> FindAllExact(string word, int limit)

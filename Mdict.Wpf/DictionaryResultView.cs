@@ -27,9 +27,9 @@ namespace Mdict.Wpf
             Visibility = Visibility.Collapsed;
             Margin = new Thickness(0, 0, 0, 18);
             var header = new DockPanel();
-            var arrowBrush = new SolidColorBrush(Color.FromRgb(184, 26, 53));
-            collapseArrow = new System.Windows.Shapes.Path { Width = 16, Height = 16, Stretch = Stretch.Uniform,
-                Fill = arrowBrush, Stroke = arrowBrush, StrokeThickness = 2.5, StrokeLineJoin = PenLineJoin.Round };
+            var arrowBrush = new SolidColorBrush(Color.FromRgb(236, 235, 194));
+            collapseArrow = new System.Windows.Shapes.Path { Width = 12.8, Height = 12.8, Stretch = Stretch.Uniform,
+                Fill = arrowBrush, Stroke = arrowBrush, StrokeThickness = 2, StrokeLineJoin = PenLineJoin.Round };
             UpdateCollapseArrow(false);
             collapseButton = new Button { Content = collapseArrow, Width = 24, Height = 24,
                 Margin = new Thickness(0, 0, 8, 0), Padding = new Thickness(0),
@@ -43,13 +43,14 @@ namespace Mdict.Wpf
             DockPanel.SetDock(collapseButton, Dock.Left);
             header.Children.Add(collapseButton);
             header.Children.Add(new TextBlock { Text = path == null ? "WebView2" : Path.GetFileNameWithoutExtension(path),
-                FontSize = 14, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap,
+                FontSize = 14, FontWeight = FontWeights.SemiBold, Foreground = arrowBrush, TextWrapping = TextWrapping.Wrap,
                 VerticalAlignment = VerticalAlignment.Center });
-            Children.Add(new Border { BorderBrush = new SolidColorBrush(Color.FromRgb(224, 228, 232)),
+            Children.Add(new Border { Background = new SolidColorBrush(Color.FromRgb(0, 113, 117)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(224, 228, 232)),
                 BorderThickness = new Thickness(0, 0, 0, 1), Padding = new Thickness(12, 12, 12, 10),
                 Child = header });
             // Composition control participates in WPF clipping and the outer ScrollViewer.
-            Browser = new WebView2CompositionControl { Height = 120, MinHeight = 80,
+            Browser = new DictionaryBrowser { Height = 120, MinHeight = 80,
                 DefaultBackgroundColor = System.Drawing.Color.White };
             Children.Add(Browser);
             Controller = new WebViewController(Browser, Service);
@@ -110,6 +111,15 @@ namespace Mdict.Wpf
             Browser.Dispose();
             // Close may wait for a reader; never block the UI on a prefix/resource lock.
             _ = System.Threading.Tasks.Task.Run(Service.Close);
+        }
+    }
+
+    internal sealed class DictionaryBrowser : WebView2CompositionControl
+    {
+        protected override void OnMouseDoubleClick(System.Windows.Input.MouseButtonEventArgs e)
+        {
+            // OnMouseDown already forwards the second press. Forwarding it here
+            // again makes Chromium see a third click and select the whole line.
         }
     }
 }

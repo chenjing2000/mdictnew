@@ -17,6 +17,7 @@ namespace Mdict.Wpf.WebView
     // Browser navigation and display only; no MDX/MDD format knowledge.
     public class WebViewController : IDisposable
     {
+        public const string RuntimeDownloadUrl = "https://developer.microsoft.com/microsoft-edge/webview2/#download-section";
         private readonly IWebView2 view;
         private readonly DictionaryService dictionaryService;
         private WebResourceHandler resources;
@@ -31,6 +32,7 @@ namespace Mdict.Wpf.WebView
 
         // A requested entry key is delivered to the UI, not looked up here.
         public event Action<string> EntryLookupRequested;
+        public event Action<string, bool> TextSelectionRequested;
         public event Action<double> ContentHeightChanged;
         public event Action<double> ScrollRequested;
         public event Action<double> AnchorRequested;
@@ -45,7 +47,13 @@ namespace Mdict.Wpf.WebView
 
         public async Task InitializeAsync()
         {
-            await view.EnsureCoreWebView2Async(null);
+            string runtimeError = GetRuntimeError();
+            if (runtimeError != null) throw new InvalidOperationException(runtimeError);
+            string cachePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "MdictViewer", "WebView2");
+            var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: cachePath);
+            if (disposed) throw new ObjectDisposedException(nameof(WebViewController));
+            await view.EnsureCoreWebView2Async(environment);
             if (disposed) throw new ObjectDisposedException(nameof(WebViewController));
             CoreWebView2 core = view.CoreWebView2;
             // Developer diagnostic switch only; Oxford scripts enabled by default.
@@ -53,6 +61,7 @@ namespace Mdict.Wpf.WebView
             core.Settings.IsScriptEnabled = !disableScripts;
             core.Settings.IsWebMessageEnabled = true;
             core.Settings.AreHostObjectsAllowed = false;
+            core.Settings.AreDefaultContextMenusEnabled = false;
 #if DEBUG
             core.Settings.AreDevToolsEnabled = true;
 #else
@@ -73,6 +82,19 @@ namespace Mdict.Wpf.WebView
                 await RegisterEmbeddedScriptAsync(core, "LayoutBridge.js");
             }
             initialized = true;
+        }
+
+        public static string GetRuntimeError()
+        {
+            try
+            {
+                CoreWebView2Environment.GetAvailableBrowserVersionString();
+                return null;
+            }
+            catch (WebView2RuntimeNotFoundException)
+            {
+                return "请安装 Microsoft Edge WebView2 Runtime 后重试。下载：" + RuntimeDownloadUrl;
+            }
         }
 
         private static async Task RegisterEmbeddedScriptAsync(CoreWebView2 core, string filename)
@@ -191,8 +213,24 @@ namespace Mdict.Wpf.WebView
                 var root = message.RootElement;
                 if (root.ValueKind != JsonValueKind.Object ||
                     !root.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String ||
-                    !root.TryGetProperty("value", out var value) || value.ValueKind != JsonValueKind.Number ||
-                    !value.TryGetDouble(out double number) ||
+                    !root.TryGetProperty("value", out var value)) return;
+                string action = type.GetString();
+                if (action == "mdict-copy" || action == "mdict-copy-lookup")
+                {
+                    if (navigationBusy || value.ValueKind != JsonValueKind.String) return;
+                    string text = value.GetString();
+                    if (string.IsNullOrWhiteSpace(text)) return;
+                    bool lookup = action == "mdict-copy-lookup";
+                    if (lookup)
+                    {
+                        text = text.Trim();
+                        if (text.Length > 512) return;
+                        foreach (char character in text) if (char.IsControl(character)) return;
+                    }
+                    TextSelectionRequested?.Invoke(text, lookup);
+                    return;
+                }
+                if (value.ValueKind != JsonValueKind.Number || !value.TryGetDouble(out double number) ||
                     !double.IsFinite(number) || Math.Abs(number) > 1000000) return;
                 switch (type.GetString())
                 {
@@ -228,7 +266,7 @@ namespace Mdict.Wpf.WebView
                 "script-src 'self' 'unsafe-inline'; " +
                 "connect-src 'none'; media-src 'self'; " +
                 "frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'\">" +
-                "</head><body>" + html + "</body></html>";
+                "<style>html,body{font-size:14px}</style></head><body>" + html + "</body></html>";
 
             string url = resources.PreparePage(page);
             return await NavigateAndInspectAsync(url, 60000, false);
@@ -326,6 +364,7 @@ namespace Mdict.Wpf.WebView
                 core.WebMessageReceived -= OnWebMessageReceived;
             }
             EntryLookupRequested = null;
+            TextSelectionRequested = null;
             ContentHeightChanged = null;
             ScrollRequested = null;
             AnchorRequested = null;

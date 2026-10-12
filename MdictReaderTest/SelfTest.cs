@@ -88,6 +88,8 @@ internal class SelfTest
 
             Assert(all.DuplicateExactKeyCount == 1 &&
                    all.FindExact("APPLE").RecordOffset == 42 &&
+                   all.FindExactIndex("APPLE") == all.AllEntries.IndexOf(all.FindExact("APPLE")) &&
+                   all.FindExactIndex(null) == -1 && all.FindExactIndex("absent") == -1 &&
                    all.FindAllExact("apple", 20).Count == 2 &&
                    all.FindPrefix("ap", 10).Count == 2 &&
                    all.FindExact("absent") == null,

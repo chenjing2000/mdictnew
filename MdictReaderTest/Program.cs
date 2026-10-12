@@ -449,13 +449,13 @@ internal class Program
     {
         Console.WriteLine();
         Console.WriteLine("[HTML lookup: " + word + "]");
-        KeyEntry entry = keys.FindExact(word);
-        if (entry == null)
+        int index = keys.FindExactIndex(word);
+        if (index < 0)
         {
             Console.WriteLine("NOT FOUND");
             return;
         }
-        int index = keys.AllEntries.IndexOf(entry);
+        KeyEntry entry = keys.AllEntries[index];
         string html = reader.ReadHtml(header.FilePath, keys, records, index);
         byte[] htmlBytes = Encoding.UTF8.GetBytes(html);
         Console.WriteLine("Matched key          : " + entry.Key);

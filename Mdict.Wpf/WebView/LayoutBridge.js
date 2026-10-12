@@ -12,8 +12,8 @@
     function measure() {
         scheduled = false;
         if (!document.body) return;
-        // Suppress viewport-driven growth to avoid vh/% feedback. Shrinking
-        // content must still publish when CSSOM changes coincide with resize.
+        // Suppress growth caused by our last height report to avoid vh/% feedback.
+        // An unrelated viewport resize must still measure CSS-only content changes.
         const viewportChanged = window.innerHeight !== lastViewportHeight;
         const widthChanged = window.innerWidth !== lastWidth;
         lastWidth = window.innerWidth;
@@ -23,7 +23,8 @@
         const height = Math.ceil(Math.max(body.offsetHeight, body.scrollHeight) +
             body.getBoundingClientRect().top + window.scrollY + bottomMargin);
         const geometryChanged = height !== lastMeasuredHeight;
-        const followsViewport = viewportChanged && !widthChanged && !contentChanged;
+        const followsViewport = viewportChanged && window.innerHeight === lastHeight &&
+            !widthChanged && !contentChanged;
         const changed = contentChanged;
         contentChanged = false;
         lastMeasuredHeight = height;

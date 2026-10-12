@@ -23,7 +23,7 @@ public class OxfordDictionary
         if (string.IsNullOrWhiteSpace(mdxPath) ||
             !mdxPath.EndsWith(".mdx", StringComparison.OrdinalIgnoreCase) ||
             !File.Exists(mdxPath))
-            throw new FileNotFoundException("Expected an existing Oxford .mdx file.", mdxPath);
+            throw new FileNotFoundException("Expected an existing .mdx dictionary file.", mdxPath);
 
         MdxPath = Path.GetFullPath(mdxPath);
         MddPaths = DiscoverMddVolumes(MdxPath);
@@ -77,10 +77,9 @@ public class OxfordDictionary
     public string Lookup(string word)
     {
         LoadMdx();
-        KeyEntry entry = mdxKeys.FindExact(word);
-        if (entry == null)
+        int index = mdxKeys.FindExactIndex(word);
+        if (index < 0)
             return null;
-        int index = mdxKeys.AllEntries.IndexOf(entry);
         return recordReader.ReadHtml(MdxPath, mdxKeys, mdxRecords, index);
     }
 

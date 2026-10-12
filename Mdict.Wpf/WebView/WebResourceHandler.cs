@@ -111,6 +111,7 @@ namespace Mdict.Wpf.WebView
 
             // Resource opening (especially a new MDD volume) can take time.
             // A deferral avoids blocking WebView2's UI-thread message loop.
+            long pageId = currentPageId;
             using (e.GetDeferral())
             {
                 try
@@ -119,17 +120,23 @@ namespace Mdict.Wpf.WebView
                     if (disposed) return;
                     if (content == null)
                     {
-                        ResourceFailures++;
-                        LastError = key + " (not found)";
+                        if (pageId == currentPageId)
+                        {
+                            ResourceFailures++;
+                            LastError = key + " (not found)";
+                        }
                         Debug.WriteLine("[MdictViewer MDD 404] " + key);
                         e.Response = MakeTextResponse(404, "Not Found", "Resource not found");
                     }
                     else
                     {
-                        ResourceSuccess++;
-                        if (mime == "text/css") CssSuccess++;
-                        if (mime == "application/javascript") JsSuccess++;
-                        if (mime.StartsWith("image/", StringComparison.Ordinal)) ImageSuccess++;
+                        if (pageId == currentPageId)
+                        {
+                            ResourceSuccess++;
+                            if (mime == "text/css") CssSuccess++;
+                            if (mime == "application/javascript") JsSuccess++;
+                            if (mime.StartsWith("image/", StringComparison.Ordinal)) ImageSuccess++;
+                        }
                         string responseType = mime;
                         if (mime == "text/css" || mime == "application/javascript")
                             responseType += "; charset=utf-8";
@@ -142,9 +149,13 @@ namespace Mdict.Wpf.WebView
                 catch (Exception ex)
                 {
                     if (disposed) return;
-                    ResourceFailures++;
-                    LastError = key + " (" + ex.Message + ")";
-                    Debug.WriteLine("[MdictViewer MDD error] " + LastError);
+                    string error = key + " (" + ex.Message + ")";
+                    if (pageId == currentPageId)
+                    {
+                        ResourceFailures++;
+                        LastError = error;
+                    }
+                    Debug.WriteLine("[MdictViewer MDD error] " + error);
                     e.Response = MakeTextResponse(500, "Internal Server Error", "Resource loading failed");
                 }
             }
