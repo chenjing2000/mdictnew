@@ -16,7 +16,6 @@ namespace Mdict.Wpf
         public WebView2CompositionControl Browser { get; }
         public WebViewController Controller { get; }
         public bool IsAvailable { get; set; }
-        private readonly TextBlock error;
         private readonly Button collapseButton;
         private readonly System.Windows.Shapes.Path collapseArrow;
         private bool browserInitialized;
@@ -53,24 +52,13 @@ namespace Mdict.Wpf
             Browser = new WebView2CompositionControl { Height = 120, MinHeight = 80,
                 DefaultBackgroundColor = System.Drawing.Color.White };
             Children.Add(Browser);
-            error = new TextBlock { Margin = new Thickness(16), TextWrapping = TextWrapping.Wrap,
-                Foreground = new SolidColorBrush(Color.FromRgb(186, 91, 73)), Visibility = Visibility.Collapsed };
-            Children.Add(error);
             Controller = new WebViewController(Browser, Service);
             Controller.ContentHeightChanged += height => Browser.Height = Math.Max(80, height);
-        }
-
-        public void ShowError(string message)
-        {
-            Browser.Visibility = Visibility.Collapsed;
-            error.Text = message;
-            error.Visibility = Visibility.Visible;
         }
 
         public void ShowBrowser()
         {
             Visibility = Visibility.Visible;
-            error.Visibility = Visibility.Collapsed;
             Browser.Visibility = Visibility.Visible;
             collapseButton.IsEnabled = true;
             UpdateCollapseButton(false);
@@ -79,7 +67,6 @@ namespace Mdict.Wpf
         public void PrepareResult()
         {
             Visibility = Visibility.Visible;
-            error.Visibility = Visibility.Collapsed;
             // Keep the browser in layout for initialization, but never expose the old page.
             Browser.Visibility = Visibility.Hidden;
             collapseButton.IsEnabled = false;

@@ -463,6 +463,21 @@ internal static class Program
             Edit(""); Press(Key.Enter); await Idle();
             Check(sections.All(s => s.Visibility == Visibility.Collapsed) && Field<string>("displayedWord") == "",
                 "Enter on empty input clears existing results");
+            await Configure(a);
+            Edit("apple"); Press(Key.Enter); await Idle();
+            count = Field<List<string>>("history").Count;
+            Field<List<DictionaryResultView>>("sections")[0].Controller.Dispose();
+            Edit("unfinished-input");
+            await (Task)typeof(MainWindow).GetMethod("LookupAsync", BindingFlags.Instance | BindingFlags.NonPublic)
+                .Invoke(window, new object[] { "banana", true, -1, false });
+            Check(input.Text == "apple", "entry display failure restores the previous query text");
+            Check(Field<string>("displayedWord") == "" && Field<List<string>>("history").Count == count &&
+                Field<List<DictionaryResultView>>("sections").All(s => s.Visibility == Visibility.Collapsed),
+                "entry display failure leaves results empty and history unchanged");
+            await Configure(a);
+            Field<List<DictionaryResultView>>("sections")[0].Controller.Dispose();
+            Edit("banana"); Press(Key.Enter); await Idle();
+            Check(input.Text == "banana", "manual display failure preserves the edited query text");
             for (int i = 0; i < 5; i++)
             {
                 var abandoned = new DictionaryResultView(a);

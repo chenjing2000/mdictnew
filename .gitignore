@@ -5,7 +5,9 @@
 /dist/
 /dev-tests/artifacts-*/
 .vs/
+.idea/
 *.user
+*.rsuser
 *.suo
 *.userosscache
 *.sln.docstates
@@ -26,6 +28,11 @@
 # Temporary and OS files; legitimate source images/HTML are not ignored
 *.tmp
 *.bak
+*.orig
+*.rej
+*~
+*.swp
+*.swo
 Thumbs.db
 Desktop.ini
 .DS_Store

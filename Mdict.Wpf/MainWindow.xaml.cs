@@ -545,6 +545,8 @@ namespace Mdict.Wpf
                 }
                 if (loaded == 0)
                 {
+                    if (!preserveInputOnFailure && previousWord.Length > 0)
+                        SetWordText(previousWord);
                     StatusText.Text = "词条显示失败：" + word + "；" + string.Join("；", displayErrors);
                     return;
                 }

@@ -40,7 +40,7 @@ public class OxfordHeaderReader
             }
 
             // First 4 bytes: unsigned header byte count, big-endian.
-            byte[] sizeBytes = ReadExactly(reader, 4);
+            byte[] sizeBytes = MdictBinary.ReadBytes(reader, 4);
             uint byteCount = ((uint)sizeBytes[0] << 24) |
                              ((uint)sizeBytes[1] << 16) |
                              ((uint)sizeBytes[2] << 8) |
@@ -56,10 +56,10 @@ public class OxfordHeaderReader
                 throw new InvalidDataException("Header extends beyond the end of the file.");
             }
 
-            byte[] headerBytes = ReadExactly(reader, (int)byteCount);
+            byte[] headerBytes = MdictBinary.ReadBytes(reader, (int)byteCount);
 
             // Next 4 bytes: Adler-32 of the *raw header bytes*, little-endian.
-            byte[] checksumBytes = ReadExactly(reader, 4);
+            byte[] checksumBytes = MdictBinary.ReadBytes(reader, 4);
             uint storedChecksum = (uint)checksumBytes[0] |
                                   ((uint)checksumBytes[1] << 8) |
                                   ((uint)checksumBytes[2] << 16) |
@@ -121,16 +121,6 @@ public class OxfordHeaderReader
 
             return header;
         }
-    }
-
-    private static byte[] ReadExactly(BinaryReader reader, int count)
-    {
-        byte[] data = reader.ReadBytes(count);
-        if (data.Length != count)
-        {
-            throw new InvalidDataException("Unexpected end of file.");
-        }
-        return data;
     }
 
     public static uint CalculateAdler32(byte[] data)

@@ -40,7 +40,7 @@ dotnet run --project .\Mdict.Wpf
 .\tools\Publish.ps1
 ```
 
-脚本直接发布到 `dist/MdictViewer`，成功后清除三个应用项目的重复 `bin` 输出；保留 .NET 必需的 `obj` 编译缓存，不创建 `artifacts` 或按修改版本命名的发布目录。`dotnet run` 用于开发，会产生常规 `bin/obj` 输出。
+脚本直接发布到 `dist/MdictViewer`，成功后清除三个应用项目的重复 `bin` 输出；保留可再生成的 `obj` 编译缓存，不创建 `artifacts` 或按修改版本命名的发布目录。`dotnet run` 用于开发，会产生常规 `bin/obj` 输出；清理这些目录后，SDK 会在下次构建时重建。
 
 ## 验证
 
@@ -52,7 +52,7 @@ dotnet run --project .\dev-tests\Mdict.Wpf.Tests -- "<Oxford MDX 完整路径>"
 dotnet run --project .\dev-tests\Mdict.Wpf.Tests -- --local-resources
 ```
 
-Core 自测 28 项；WPF 集成检查 125 项；Entry / Layout 桥接分别 12 / 9 项；独立资源检查 7 项，共 181 项。WPF 测试会短暂打开窗口，使用独立临时设置，并验证真实词典、启动隐藏容器、查询清空、结果折叠、空白与图片结果、窗口限制、图标、事件路由、DOM、候选取消、统一历史、多词典、设置界面、独立 CSS 与浏览器初始化失败后的重试。
+Core 自测 28 项；WPF 集成检查 128 项；Entry / Layout 桥接分别 12 / 9 项；独立资源检查 7 项，共 184 项。WPF 测试会短暂打开窗口，使用独立临时设置，并验证真实词典、启动隐藏容器、查询清空、结果折叠、空白与图片结果、窗口限制、图标、事件路由、DOM、候选取消、统一历史、多词典、设置界面、独立 CSS、浏览器初始化失败后的重试及显示失败后的输入恢复。
 
 这些测试不替代原生键鼠操作和实际音频试听，也不证明所有词典脚本兼容。重新构建默认输出中的主程序前，应关闭对应实例，避免文件占用。
 
@@ -61,11 +61,12 @@ Core 自测 28 项；WPF 集成检查 125 项；Entry / Layout 桥接分别 12 /
 - [模块职责与数据流](docs/architecture.md)
 - [查询刷新、隐藏容器与折叠](docs/result-visibility.md)
 - [独立 CSS 与同目录资源读取修复](docs/local-resources.md)
-- [最新整体复查与清理记录](docs/final-audit.md)
+- [最新代码审查、整改与清理记录](docs/code-audit-2026-10-12.md)
+- [此前整体复查记录](docs/final-audit.md)
 - [启动留空、字号、图标与窗口限制](docs/startup-and-appearance.md)
 - [代码审查、整改和清理记录](docs/review-and-cleanup.md)
 - [历史 handoff、调试记录和方案](docs/history/README.md)
 
 源码、正式测试、图标工具和历史文档保留；旧构建、旧发布、临时诊断工具、日志和截图已清理，不保留 `artifacts`。发布统一位于 `dist/MdictViewer`，由 `.gitignore` 排除。历史文档中的旧生成文件路径仅作为当时的记录，文件已清理。词典文件、WebView2 缓存和个人 IDE 设置不进入版本管理；合法的图片、HTML 和音频资源不被全局忽略。
 
-暂不实现模糊查询、全文搜索、拼写纠错、新索引系统或历史持久化。现有线性搜索保持不变，实际出现瓶颈后再测量和优化。
+暂不实现模糊查询、全文搜索、拼写纠错、新索引系统或历史持久化。精确键映射、前缀线性扫描及现有记录定位保持不变，实际出现瓶颈后再测量和优化。

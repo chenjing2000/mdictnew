@@ -3,7 +3,6 @@ using System.Globalization;
 using System.ComponentModel;
 using System.IO;
 using System.Reflection;
-using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Windows;
@@ -68,7 +67,7 @@ namespace Mdict.Wpf.WebView
             resources.Register();
             if (!disableScripts)
             {
-                // Both bridges must be registered before the first document.
+                // Register all bridges before the first document.
                 await RegisterEmbeddedScriptAsync(core, "AudioBridge.js");
                 await RegisterEmbeddedScriptAsync(core, "EntryBridge.js");
                 await RegisterEmbeddedScriptAsync(core, "LayoutBridge.js");
@@ -233,16 +232,6 @@ namespace Mdict.Wpf.WebView
 
             string url = resources.PreparePage(page);
             return await NavigateAndInspectAsync(url, 60000, false);
-        }
-
-        public async Task<int> ShowMessageAsync(string message)
-        {
-            string safe = WebUtility.HtmlEncode(message ?? "");
-            string page = "<!doctype html><html><head><meta charset=\"utf-8\"></head>" +
-                "<body style=\"font-family:Segoe UI,sans-serif;padding:25px;color:#667085\">" +
-                safe + "</body></html>";
-            string url = resources.PreparePage(page);
-            return await NavigateAndInspectAsync(url, 60000);
         }
 
         // F9 does not require an opened dictionary or any MDD resources.
