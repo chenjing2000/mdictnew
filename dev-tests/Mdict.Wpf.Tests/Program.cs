@@ -21,6 +21,7 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Length == 1 && args[0] == "--local-resources") return LocalResourceTests.Run();
         Console.WriteLine("Runtime: " + System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription);
         Console.WriteLine("WPF: " + typeof(System.Windows.Application).Assembly.Location);
         if (args.Length != 1 || !File.Exists(args[0]))
@@ -51,8 +52,8 @@ internal static class Program
                     "command-line dictionary bypasses corrupt saved configuration without rewriting it");
                 Check(input.Text == "" && Field<string>("displayedWord") == "" &&
                     Field<List<string>>("history").Count == 0, "startup leaves input and lookup history empty");
-                Check(await Script("!document.body || document.body.innerText.trim().length === 0") == "true",
-                    "startup dictionary result is blank without a sample lookup");
+                Check(Field<List<DictionaryResultView>>("sections").All(s => s.Visibility == Visibility.Collapsed && s.Browser.CoreWebView2 == null),
+                    "startup hides every dictionary container without initializing browsers");
                 var service = Field<List<DictionaryResultView>>("sections")[0].Service;
                 var reader = service.GetType().GetField("dictionary", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(service);
                 Check(reader.GetType().GetField("mdxKeys", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(reader) == null,
@@ -147,10 +148,11 @@ internal static class Program
                 Edit("zzzz_no_such_entry_123");
                 Press(Key.Enter);
                 await Idle();
-                Check(Field<string>("displayedWord") == "apple" &&
+                Check(Field<string>("displayedWord") == "" &&
                     input.Text == "zzzz_no_such_entry_123" &&
-                    Field<List<string>>("history").Count == historyCount,
-                    "missing manual lookup preserves page, input and history");
+                    Field<List<string>>("history").Count == historyCount &&
+                    Field<List<DictionaryResultView>>("sections").All(s => s.Visibility == Visibility.Collapsed),
+                    "missing manual lookup clears results and preserves input and history");
 
                 Edit("appl");
                 await WaitUntil(() => popup.IsOpen, "Tab suggestions");
@@ -279,12 +281,22 @@ internal static class Program
                 string companionHtml = await Task.Run(() => realSections[1].Service.Lookup("apple"));
                 Check(realSections.Count == 2 && realSections.All(s => s.IsAvailable) &&
                     await ScriptAt(0, "document.body.innerText.includes('apple')") == "true" &&
-                    (companionHtml == null ? await ScriptAt(1, "document.body.innerText.includes('未找到词条')") == "true" :
+                    (string.IsNullOrWhiteSpace(companionHtml) ? realSections[1].Visibility == Visibility.Collapsed :
                         await ScriptAt(1, "document.body.innerText.trim().length > 0") == "true"),
                     "two actual Oxford MDX files display independent lookup results");
             }
             string a = DictionaryFixture.Create(directory, "A", "#ba5b49", "only-a");
             string b = DictionaryFixture.Create(directory, "B", "#3271ae", "only-b");
+            string localDirectory = Path.Combine(directory, "standalone");
+            Directory.CreateDirectory(localDirectory);
+            string local = DictionaryFixture.Create(localDirectory, "Local", "black", "only-local");
+            File.Delete(Path.ChangeExtension(local, ".mdd"));
+            File.WriteAllText(Path.Combine(localDirectory, "shared.css"), ".marker{color:rgb(11,22,33)}");
+            Edit("apple");
+            await Configure(a, local);
+            Check(await ScriptAt(0, "getComputedStyle(document.querySelector('.marker')).color") == "\"rgb(186, 91, 73)\"" &&
+                await ScriptAt(1, "getComputedStyle(document.querySelector('.marker')).color") == "\"rgb(11, 22, 33)\"",
+                "standalone CSS loads in WebView2 and stays isolated from another dictionary's MDD");
             string settings = Path.Combine(directory, "settings.json");
             DictionarySettings.Save(settings, new[] { a, b });
             Check(DictionarySettings.Load(settings).SequenceEqual(new[] { a, b }), "settings round-trip preserves ordered MDX paths");
@@ -409,19 +421,48 @@ internal static class Program
             Click("BackButton"); await Idle();
             Edit("only-a"); Press(Key.Enter); await Idle();
             Check(await ScriptAt(0, "document.body.innerText.includes('A only-a')") == "true" &&
-                await ScriptAt(1, "document.body.innerText.includes('未找到词条')") == "true" &&
+                sections[0].Visibility == Visibility.Visible && sections[1].Visibility == Visibility.Collapsed &&
                 !((Button)window.FindName("ForwardButton")).IsEnabled && !Field<List<string>>("history").Contains("cooking-apple"),
-                "partial match displays missing region and new lookup discards forward branch");
+                "partial match hides missing dictionary and new lookup discards forward branch");
             int count = Field<List<string>>("history").Count;
+            var toggle = VisualChild<Button>(sections[0]);
+            toggle.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Check(sections[0].Visibility == Visibility.Visible && sections[0].Browser.Visibility == Visibility.Collapsed,
+                "collapse keeps filename header and hides result body");
+            window.UpdateLayout();
+            await Task.Delay(80);
+            Check((string)toggle.ToolTip == "展开查询结果" && scroll.ScrollableHeight == 0,
+                "collapsed arrow and layout remove the result's scroll space");
+            Capture((FrameworkElement)window.Content, "folded-result.png");
+            toggle.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Check(sections[0].Browser.Visibility == Visibility.Visible, "toggle expands existing result again");
+            toggle.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            Edit("apple"); Press(Key.Enter);
+            Check(sections.All(s => s.Visibility == Visibility.Collapsed), "Enter immediately clears all prior containers");
+            await Idle();
+            Check(sections.All(s => s.Visibility == Visibility.Visible && s.Browser.Visibility == Visibility.Visible),
+                "new query expands all matching results");
+            count = Field<List<string>>("history").Count;
             Edit("no-such-word"); Press(Key.Enter); await Idle();
-            Check(Field<List<string>>("history").Count == count && Field<string>("displayedWord") == "only-a" &&
-                await ScriptAt(0, "document.body.innerText.includes('A only-a')") == "true" && input.IsKeyboardFocused,
-                "all misses preserve prior pages/history and input focus");
+            Check(Field<List<string>>("history").Count == count && Field<string>("displayedWord") == "" &&
+                sections.All(s => s.Visibility == Visibility.Collapsed) && input.IsKeyboardFocused,
+                "all misses clear displayed content without adding history or losing input focus");
+            Edit("apple"); Press(Key.Enter); await Idle();
+            count = Field<List<string>>("history").Count;
             Edit("unfinished-input");
             await Script("let missing=document.createElement('a');missing.href='entry://absent';document.body.appendChild(missing);missing.click();true");
             await Task.Delay(50); await Idle();
-            Check(input.Text == "only-a" && Field<List<string>>("history").Count == count,
-                "failed entry link preserves page/history and restores displayed word per existing contract");
+            Check(input.Text == "apple" && Field<List<string>>("history").Count == count && sections.All(s => s.Visibility == Visibility.Collapsed),
+                "failed entry link clears results and keeps history unchanged");
+            Edit("image-only"); Press(Key.Enter); await Idle();
+            Check(sections.All(s => s.Visibility == Visibility.Visible) && await Script("document.body.innerText.trim().length") == "0",
+                "image-only HTML result displays without requiring visible text");
+            Edit("blank-result"); Press(Key.Enter); await Idle();
+            Check(sections.All(s => s.Visibility == Visibility.Collapsed), "whitespace-only results do not display dictionary containers");
+            Edit("apple"); Press(Key.Enter); await Idle();
+            Edit(""); Press(Key.Enter); await Idle();
+            Check(sections.All(s => s.Visibility == Visibility.Collapsed) && Field<string>("displayedWord") == "",
+                "Enter on empty input clears existing results");
             for (int i = 0; i < 5; i++)
             {
                 var abandoned = new DictionaryResultView(a);
@@ -466,6 +507,12 @@ internal static class Program
             {
                 Environment.SetEnvironmentVariable("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER",
                     Path.Combine(directory, "missing-browser"));
+                Edit("");
+                await Configure(a);
+                Press(Key.F9); await Idle();
+                Check(Field<List<DictionaryResultView>>("sections").All(s => s.Visibility == Visibility.Collapsed),
+                    "failed diagnostic on a configured dictionary leaves no empty container");
+                await Configure();
                 Press(Key.F9); await Idle();
                 Check(((TextBlock)window.FindName("StatusText")).Text.StartsWith("WebView2 自测失败："),
                     "missing browser reproduces diagnostic initialization failure");

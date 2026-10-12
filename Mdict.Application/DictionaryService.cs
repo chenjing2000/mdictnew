@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using Mdict.Core;
 
 namespace Mdict.Application
@@ -51,8 +52,38 @@ namespace Mdict.Application
                 if (dictionary == null)
                     throw new InvalidOperationException("No dictionary is open.");
                 OxfordResourceMatch match;
-                return dictionary.GetResource(path, out match);
+                byte[] content = dictionary.GetResource(path, out match);
+                if (content != null) return content;
+                return ReadLocalResource(path);
             }
+        }
+
+        private byte[] ReadLocalResource(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return null;
+            if (path.StartsWith("sound://", StringComparison.OrdinalIgnoreCase))
+                path = path.Substring("sound://".Length);
+            string[] segments = path.Replace('\\', '/').TrimStart('/').Split('/');
+            foreach (string segment in segments)
+            {
+                if (segment.Length == 0 || segment.EndsWith('.') || segment.EndsWith(' ') ||
+                    segment.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+                    return null;
+            }
+
+            string directory = Path.GetDirectoryName(dictionary.MdxPath);
+            string localPath = directory;
+            foreach (string segment in segments) localPath = Path.Combine(localPath, segment);
+            if (!File.Exists(localPath)) return null;
+
+            // Do not follow a resource file or subdirectory that redirects outside the dictionary.
+            string current = directory;
+            foreach (string segment in segments)
+            {
+                current = Path.Combine(current, segment);
+                if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0) return null;
+            }
+            return File.ReadAllBytes(localPath);
         }
 
         public void Close()

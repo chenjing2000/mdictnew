@@ -8,10 +8,11 @@ internal static class DictionaryFixture
     public static string Create(string directory, string name, string color, string exclusive)
     {
         string path = Path.Combine(directory, name + ".mdx");
-        string[] words = new[] { "apple", "apple-pie", "appraise", "banana", "cooking-apple", exclusive }
+        string[] words = new[] { "apple", "apple-pie", "appraise", "banana", "blank-result", "image-only", "cooking-apple", exclusive }
             .Concat(Enumerable.Range(0, 55).Select(i => "term" + i.ToString("00"))).OrderBy(w => w, StringComparer.OrdinalIgnoreCase).ToArray();
         if (name == "B") words[Array.IndexOf(words, "apple")] = "APPLE";
-        byte[][] records = words.Select(word => Encoding.UTF8.GetBytes(
+        byte[][] records = words.Select(word => Encoding.UTF8.GetBytes(word == "blank-result" ? " \r\n\t\0" :
+            word == "image-only" ? "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"80\" height=\"40\"><rect width=\"80\" height=\"40\" fill=\"red\"/></svg>\0" :
             "<link rel=\"stylesheet\" href=\"shared.css\"><p class=\"marker\">" + name + " " + word + "</p>" +
             "<a href=\"entry://cooking-apple\">next</a><a href=\"#bottom\">anchor</a>" +
             "<div id=\"expansion\" style=\"height:900px\">body</div><p id=\"bottom\">bottom</p>\0")).ToArray();

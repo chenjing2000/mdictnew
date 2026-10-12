@@ -232,7 +232,7 @@ namespace Mdict.Wpf.WebView
                 "</head><body>" + html + "</body></html>";
 
             string url = resources.PreparePage(page);
-            return await NavigateAndInspectAsync(url, 60000);
+            return await NavigateAndInspectAsync(url, 60000, false);
         }
 
         public async Task<int> ShowMessageAsync(string message)
@@ -266,7 +266,7 @@ namespace Mdict.Wpf.WebView
                 resources.ResourceSuccess + " / 失败 " + resources.ResourceFailures;
         }
 
-        private async Task<int> NavigateAndInspectAsync(string url, int timeoutMilliseconds)
+        private async Task<int> NavigateAndInspectAsync(string url, int timeoutMilliseconds, bool requireText = true)
         {
             if (disposed) throw new ObjectDisposedException(nameof(WebViewController));
             if (!initialized)
@@ -308,7 +308,7 @@ namespace Mdict.Wpf.WebView
                     "document.body ? document.body.innerText.trim().length : -1");
                 int length;
                 if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out length) ||
-                    length <= 0)
+                    length < 0 || (requireText && length == 0))
                     throw new InvalidOperationException("页面 DOM 没有可见文字：" + value);
                 return length;
             }

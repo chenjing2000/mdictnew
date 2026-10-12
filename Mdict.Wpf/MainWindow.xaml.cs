@@ -135,6 +135,7 @@ namespace Mdict.Wpf
             historyIndex = -1;
             displayedWord = "";
             StatusText.Text = "正在打开词典…";
+            var openErrors = new List<string>();
             try
             {
                 foreach (string path in configuredPaths)
@@ -146,18 +147,17 @@ namespace Mdict.Wpf
                     {
                         await section.OpenAsync();
                         if (closed || version != configurationVersion) return;
-                        await section.Controller.InitializeAsync();
-                        if (closed || version != configurationVersion) return;
                         section.IsAvailable = true;
                     }
                     catch (Exception ex)
                     {
                         if (closed || version != configurationVersion) return;
-                        section.ShowError("词典打开失败：" + ex.Message);
+                        openErrors.Add(Path.GetFileNameWithoutExtension(path) + "：" + ex.Message);
                     }
                 }
                 if (closed) return;
-                StatusText.Text = configuredPaths.Count == 0 ? "尚未设置词典。" : "词典已打开。";
+                StatusText.Text = configuredPaths.Count == 0 ? "尚未设置词典。" :
+                    openErrors.Count > 0 ? "词典打开失败：" + string.Join("；", openErrors) : "词典已打开。";
                 if (word.Length > 0) await LookupAsync(word, false);
             }
             finally
@@ -465,13 +465,24 @@ namespace Mdict.Wpf
         private async Task LookupAsync(string input, bool manageBusy,
             int requestedHistoryIndex = -1, bool preserveInputOnFailure = false)
         {
-            if (closed || !sections.Any(s => s.IsAvailable) || !browserReady)
+            if (closed || !browserReady)
                 return;
             if (manageBusy && busy)
                 return;
             string word = input == null ? "" : input.Trim();
+            string previousWord = displayedWord;
+            foreach (var section in sections) section.Visibility = Visibility.Collapsed;
+            if (diagnosticView != null) diagnosticView.Visibility = Visibility.Collapsed;
+            displayedWord = "";
+            StatusText.ToolTip = null;
+            EmptyText.Visibility = Visibility.Collapsed;
+            ResultsScroll.ScrollToTop();
             if (word.Length == 0)
+            {
+                CloseSuggestions();
+                StatusText.Text = "请输入查询词。";
                 return;
+            }
 
             CloseSuggestions();
             if (manageBusy)
@@ -493,60 +504,64 @@ namespace Mdict.Wpf
                             try { html = section.Service.Lookup(word); }
                             catch (Exception ex) { error = ex.Message; }
                         }
+                        else error = "词典未打开";
                         entries.Add((section, html, error));
                     }
                     return entries;
                 });
                 if (closed || version != configurationVersion) return;
-                if (!results.Any(r => r.Html != null))
+                if (!results.Any(r => !string.IsNullOrWhiteSpace(r.Html)))
                 {
-                    // Keep the last successful page and history unchanged.
-                    if (!preserveInputOnFailure && displayedWord.Length > 0)
-                        SetWordText(displayedWord);
+                    if (!preserveInputOnFailure && previousWord.Length > 0)
+                        SetWordText(previousWord);
                     string errors = string.Join("；", results.Where(r => r.Error != null)
                         .Select(r => Path.GetFileNameWithoutExtension(r.Section.DictionaryPath) + "：" + r.Error));
                     StatusText.Text = "未找到词条：" + word + (errors.Length > 0 ? "；" + errors : "");
                     return;
                 }
                 int loaded = 0;
+                var displayErrors = new List<string>();
                 foreach (var result in results)
                 {
-                    if (!result.Section.IsAvailable) continue;
+                    if (result.Error != null)
+                        displayErrors.Add(Path.GetFileNameWithoutExtension(result.Section.DictionaryPath) + "：" + result.Error);
+                    if (!result.Section.IsAvailable || string.IsNullOrWhiteSpace(result.Html)) continue;
                     try
                     {
+                        result.Section.PrepareResult();
+                        await result.Section.InitializeBrowserAsync();
+                        if (closed || version != configurationVersion) return;
+                        await result.Section.Controller.ShowEntryAsync(result.Html);
+                        if (closed || version != configurationVersion) return;
                         result.Section.ShowBrowser();
-                        if (result.Html != null)
-                        {
-                            await result.Section.Controller.ShowEntryAsync(result.Html);
-                            loaded++;
-                        }
-                        else await result.Section.Controller.ShowMessageAsync(result.Error == null
-                            ? "未找到词条：" + word : "词典查询失败：" + result.Error);
+                        loaded++;
                     }
                     catch (Exception ex)
                     {
-                        if (!closed) result.Section.ShowError("词条显示失败：" + ex.Message);
+                        result.Section.Visibility = Visibility.Collapsed;
+                        displayErrors.Add(Path.GetFileNameWithoutExtension(result.Section.DictionaryPath) + "：" + ex.Message);
                     }
                     if (closed || version != configurationVersion) return;
                 }
                 if (loaded == 0)
                 {
-                    StatusText.Text = "词条显示失败：" + word;
+                    StatusText.Text = "词条显示失败：" + word + "；" + string.Join("；", displayErrors);
                     return;
                 }
                 displayedWord = word;
                 SetWordText(word);
                 CommitHistory(word, requestedHistoryIndex);
                 ResultsScroll.ScrollToTop();
-                StatusText.Text = "已加载：" + word + "；命中 " + loaded + " / " + sections.Count + " 个词典";
-                StatusText.ToolTip = string.Join("\n", sections.Where(s => s.IsAvailable)
+                StatusText.Text = "已加载：" + word + "；命中 " + loaded + " / " + sections.Count + " 个词典" +
+                    (displayErrors.Count > 0 ? "；" + string.Join("；", displayErrors) : "");
+                StatusText.ToolTip = string.Join("\n", sections.Where(s => s.IsAvailable && s.Visibility == Visibility.Visible)
                     .Select(s => Path.GetFileNameWithoutExtension(s.DictionaryPath) + "：" + s.Controller.GetResourceSummary()));
             }
             catch (Exception ex)
             {
                 if (closed || version != configurationVersion) return;
-                if (!preserveInputOnFailure && displayedWord.Length > 0)
-                    SetWordText(displayedWord);
+                if (!preserveInputOnFailure && previousWord.Length > 0)
+                    SetWordText(previousWord);
                 StatusText.Text = "查询失败：" + ex.Message;
             }
             finally
@@ -589,9 +604,10 @@ namespace Mdict.Wpf
                 return;
             e.Handled = true;
             SetBusy(true);
+            DictionaryResultView target = null;
             try
             {
-                var target = sections.FirstOrDefault(s => s.IsAvailable);
+                target = sections.FirstOrDefault(s => s.IsAvailable);
                 if (target == null)
                 {
                     if (diagnosticView == null)
@@ -600,7 +616,8 @@ namespace Mdict.Wpf
                         EmptyText.Visibility = Visibility.Collapsed;
                         try
                         {
-                            await diagnosticView.Controller.InitializeAsync();
+                            diagnosticView.PrepareResult();
+                            await diagnosticView.InitializeBrowserAsync();
                         }
                         catch
                         {
@@ -614,12 +631,15 @@ namespace Mdict.Wpf
                     }
                     target = diagnosticView;
                 }
-                target.ShowBrowser();
+                target.PrepareResult();
+                await target.InitializeBrowserAsync();
                 int length = await target.Controller.ShowDiagnosticAsync();
+                target.ShowBrowser();
                 if (!closed) StatusText.Text = "WebView2 自测已加载；DOM 文本 " + length + " 字符。";
             }
             catch (Exception ex)
             {
+                if (target != null) target.Visibility = Visibility.Collapsed;
                 if (!closed) StatusText.Text = "WebView2 自测失败：" + ex.Message;
             }
             finally
