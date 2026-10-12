@@ -27,7 +27,7 @@ internal static class PublishedAppTests
             process = Process.Start(new ProcessStartInfo(exe) { WorkingDirectory = workingDirectory });
             var main = WaitElement(() => process.MainWindowHandle == IntPtr.Zero ? null :
                 AutomationElement.FromHandle(process.MainWindowHandle), "published main window");
-            WaitElement(() => Find(main, "StatusText")?.Current.Name.Contains("尚未设置词典") == true ? main : null,
+            WaitElement(() => Find(main, "SettingsButton")?.Current.IsEnabled == true ? main : null,
                 "empty startup");
             Check(!File.Exists(configuration) && Directory.GetFiles(appDirectory).Length == 1,
                 "EXE runs alone and does not create configuration at startup");
@@ -60,18 +60,23 @@ internal static class PublishedAppTests
             Check(JsonSerializer.Deserialize<List<string>>(File.ReadAllText(configuration)).SequenceEqual(new[] { dictionary }),
                 "selected dictionary is saved immediately without closing Settings");
             Check(File.ReadAllText(configuration).Contains("便携词典"), "published configuration displays Chinese directly");
-            Check(Find(main, "StatusText").Current.Name.Contains("尚未设置词典"),
+            Check(string.IsNullOrEmpty(Find(main, "StatusText")?.Current.Name),
                 "main window keeps its result while Settings is open");
             ((WindowPattern)settings.GetCurrentPattern(WindowPattern.Pattern)).Close();
-            WaitElement(() => Find(main, "StatusText")?.Current.Name == "词典已打开。" ? main : null, "settings applied after close");
+            WaitElement(() => Find(main, "SettingsButton")?.Current.IsEnabled == true ? main : null, "settings applied after close");
             var input = Find(main, "WordText");
             ((ValuePattern)input.GetCurrentPattern(ValuePattern.Pattern)).SetValue("apple");
             input.SetFocus();
             PostMessage(process.MainWindowHandle, 0x0100, new IntPtr(13), IntPtr.Zero);
             PostMessage(process.MainWindowHandle, 0x0101, new IntPtr(13), IntPtr.Zero);
-            WaitElement(() => Find(main, "StatusText")?.Current.Name.StartsWith("已加载：apple") == true ? main : null,
+            WaitElement(() =>
+            {
+                var collapse = main.FindFirst(TreeScope.Descendants,
+                    new PropertyCondition(AutomationElement.NameProperty, "收起查询结果"));
+                return collapse?.Current.IsEnabled == true ? collapse : null;
+            },
                 "single-file dictionary rendering");
-            Check(true, "bundled reader, WebView2 loader, embedded scripts and HTML display work");
+            Check(string.IsNullOrEmpty(Find(main, "StatusText")?.Current.Name), "bundled reader renders successfully without a normal notification");
             Check(!Directory.Exists(exe + ".WebView2") && !File.Exists(Path.Combine(workingDirectory, "dictionaries.json")),
                 "cache and configuration do not follow the working directory");
             Stop(process);
@@ -83,7 +88,7 @@ internal static class PublishedAppTests
             process = Process.Start(missingWebView);
             main = WaitElement(() => process.MainWindowHandle == IntPtr.Zero ? null :
                 AutomationElement.FromHandle(process.MainWindowHandle), "missing WebView2 window");
-            WaitElement(() => Find(main, "StatusText")?.Current.Name.Contains("安装 Microsoft Edge WebView2 Runtime") == true
+            WaitElement(() => Find(main, "StatusText")?.Current.Name.StartsWith("Warning: Install Microsoft Edge WebView2 Runtime") == true
                 ? main : null, "WebView2 install prompt");
             Check(Find(main, "RuntimeHelp") != null, "published EXE explains missing WebView2 and provides download link");
             Stop(process);

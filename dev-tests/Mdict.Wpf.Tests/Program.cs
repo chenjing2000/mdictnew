@@ -23,6 +23,7 @@ internal static class Program
     {
         if (args.Length == 1 && args[0] == "--local-resources") return LocalResourceTests.Run();
         if (args.Length == 1 && args[0] == "--settings") return SettingsTests.Run();
+        if (args.Length == 1 && args[0] == "--notifications") return NotificationTests.Run();
         if (args.Length == 2 && args[0] == "--published") return PublishedAppTests.Run(args[1]);
         Console.WriteLine("Runtime: " + System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription);
         Console.WriteLine("WPF: " + typeof(System.Windows.Application).Assembly.Location);
@@ -288,7 +289,7 @@ internal static class Program
             await WaitUntil(() => Clipboard.ContainsText() && Clipboard.GetText() == "banana", "drag clipboard copy");
             Check(Field<string>("displayedWord") == "apple" && Field<List<string>>("history").Count == 1,
                 "drag copies the selected text without querying or changing history");
-            Check(((TextBlock)window.FindName("StatusText")).Text.Contains("已复制所选文字"), "drag reports successful copy");
+            Check(((TextBlock)window.FindName("StatusText")).Text.Equals(""), "successful drag copy leaves the notification bar empty");
             string bounds = await Script("var t=document.getElementById('gesture-test');" +
                 "t.textContent='before banana after';" +
                 "t.style.cssText='position:fixed;left:8px;top:8px;z-index:99999;background:white';" +
@@ -316,12 +317,14 @@ internal static class Program
             }
             await WaitUntil(() => !Field<bool>("busy") && Field<string>("displayedWord") == "banana", "double-click lookup");
             Check(Clipboard.GetText() == "banana" && Field<List<string>>("history").Count == 2 &&
-                ((TextBlock)window.FindName("StatusText")).Text.StartsWith("已复制并查询：banana"),
+                ((TextBlock)window.FindName("StatusText")).Text.Equals(""),
                 "native double click selects one word in a sentence and uses unified lookup and history");
             await Script("var t=document.createElement('span');t.textContent='__missing_gesture_word__';document.body.append(t);" +
                 "var r=document.createRange();r.selectNodeContents(t);getSelection().removeAllRanges();getSelection().addRange(r);" +
                 "t.dispatchEvent(new MouseEvent('dblclick',{bubbles:true,button:0}));");
-            await WaitUntil(() => ((TextBlock)window.FindName("StatusText")).Text.StartsWith("已复制；未找到词条："), "copied missing word");
+            await WaitUntil(() => Clipboard.ContainsText() && Clipboard.GetText() == "__missing_gesture_word__" && !Field<bool>("busy"), "copied missing word");
+            Check(((TextBlock)window.FindName("StatusText")).Text == "" &&
+                ((UIElement)window.FindName("StatusPanel")).Visibility == Visibility.Collapsed, "missing lookup is silent");
             Check(Clipboard.GetText() == "__missing_gesture_word__" && Field<List<string>>("history").Count == 2,
                 "failed double-click lookup still copies and does not add history");
 
@@ -672,7 +675,7 @@ internal static class Program
                     missingRuntimeWindow.Show();
                     await WaitUntil(() => Field<bool>("browserReady", missingRuntimeWindow) &&
                         !Field<bool>("busy", missingRuntimeWindow), "missing runtime startup");
-                    Check(((TextBlock)missingRuntimeWindow.FindName("StatusText")).Text.Contains("安装 Microsoft Edge WebView2 Runtime") &&
+                    Check(((TextBlock)missingRuntimeWindow.FindName("StatusText")).Text.StartsWith("Warning: Install Microsoft Edge WebView2 Runtime") &&
                         missingRuntimeWindow.FindName("RuntimeHelp") is FrameworkElement help && help.Visibility == Visibility.Visible,
                         "startup explains a missing WebView2 runtime and offers its download link");
                 }
@@ -684,7 +687,7 @@ internal static class Program
                     "failed diagnostic on a configured dictionary leaves no empty container");
                 await Configure();
                 Press(Key.F9); await Idle();
-                Check(((TextBlock)window.FindName("StatusText")).Text.StartsWith("WebView2 自测失败："),
+                Check(((TextBlock)window.FindName("StatusText")).Text.StartsWith("Error: WebView2 diagnostic failed: "),
                     "missing browser reproduces diagnostic initialization failure");
                 Check(Field<DictionaryResultView>("diagnosticView") == null,
                     "failed diagnostic initialization releases its view for retry");
@@ -833,7 +836,7 @@ internal static class Program
             await WaitUntil(() => Field<bool>("browserReady", blockedSettings) && !Field<bool>("busy", blockedSettings),
                 "blocked configuration startup");
             ((Button)blockedSettings.FindName("SettingsButton")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-            Check(((TextBlock)blockedSettings.FindName("StatusText")).Text.StartsWith("设置初始化失败：") &&
+            Check(((TextBlock)blockedSettings.FindName("StatusText")).Text.StartsWith("Error: Could not initialize settings: ") &&
                 !blockedSettings.OwnedWindows.OfType<SettingsWindow>().Any(),
                 "configuration creation failure is reported without opening an unusable Settings dialog");
         }

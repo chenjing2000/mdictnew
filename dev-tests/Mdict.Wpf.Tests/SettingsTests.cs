@@ -68,7 +68,7 @@ internal static class SettingsTests
                 "file selection appends and saves immediately");
             Add(dialog, a.ToUpperInvariant());
             Check(error.Visibility == Visibility.Visible, "failed operation reveals the error row");
-            Check(list.Items.Count == 2 && ((TextBlock)dialog.FindName("ErrorText")).Text.Contains("已在列表中") &&
+            Check(list.Items.Count == 2 && ((TextBlock)dialog.FindName("ErrorText")).Text.StartsWith("Warning: This dictionary is already in the list.") &&
                 DictionarySettings.Load(configuration).SequenceEqual(new[] { b, a }), "duplicate selection does not change configuration");
             Add(dialog, Path.Combine(directory, "missing.mdx"));
             Check(list.Items.Count == 2, "missing new dictionary is rejected");
@@ -99,7 +99,7 @@ internal static class SettingsTests
                 Add(dialog, CreateFile(directory, "Blocked"));
                 Check(list.Items.Cast<ListBoxItem>().Select(item => (string)item.Tag).SequenceEqual(new[] { a, b }) &&
                     !dialog.HasChanges && DictionarySettings.Load(configuration).SequenceEqual(new[] { a, b }) &&
-                    ((TextBlock)dialog.FindName("ErrorText")).Text.StartsWith("设置保存失败："),
+                    ((TextBlock)dialog.FindName("ErrorText")).Text.StartsWith("Error: Could not save settings: "),
                     "failed writes from all four operations preserve list configuration and change flag");
             }
             File.Delete(a);

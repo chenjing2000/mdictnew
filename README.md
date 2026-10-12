@@ -7,7 +7,8 @@ C# / .NET 10 / WPF + WebView2 的本地 MDX 查词程序。已用 Oxford 第 10 
 ## 当前功能
 
 - 启动输入框和结果区留空，不显示词典名称及容器；只打开配置的词典，不查示例词、不恢复旧词、不读取词条索引，浏览器首次命中时初始化。
-- 回车查词，输入框保留焦点；顶部包含后退、前进和设置图标。查词输入框及词典页面的默认右键菜单禁用。
+- 回车查词，输入框保留焦点；顶部包含后退、前进和设置图标。
+- 主窗口和设置窗口的信息栏只显示英文 Warning / Error；正常启动、查词、复制、无匹配结果和空输入保持静默。异常详情使用异常类型，避免系统语言带来中文提示。查词输入框及词典页面的默认右键菜单禁用。
 - 标题栏仅显示 `MdictViewer`，主窗口最小尺寸为 450×450。输入框最小宽度 100、高度 30、字号 15，宽度随窗口伸缩；右侧三个按钮为 30×30，图标同步缩小，尺寸均为 WPF 逻辑像素。窗口外轮廓继续采用系统边框。
 - 设置最多 8 个 MDX 文件路径，按配置顺序显示本次有内容的结果区；名称使用不带扩展名的 MDX 文件名，左侧按钮可折叠/展开结果，新查询默认展开。
 - 词典标题行背景为 `#007175`，名称与左侧三角形同为 `#ecebc2`，三角形按钮背景透明；三角形缩小 20% 至 12.8×12.8，保留原有按钮点击区域。
@@ -54,10 +55,11 @@ node .\dev-tests\layout_bridge_test.cjs
 dotnet run --project .\dev-tests\Mdict.Wpf.Tests -- "<Oxford MDX 完整路径>"
 dotnet run --project .\dev-tests\Mdict.Wpf.Tests -- --local-resources
 dotnet run --project .\dev-tests\Mdict.Wpf.Tests -- --settings
+dotnet run -c Release --project .\dev-tests\Mdict.Wpf.Tests -- --notifications
 dotnet run -c Release --project .\dev-tests\Mdict.Wpf.Tests -- --published .\dist\MdictViewer\MdictViewer.exe
 ```
 
-Core 自测 28 项；单个真实 MDX 的 WPF 集成检查 128 项；Entry / Layout 桥接分别 18 / 10 项；独立资源检查 7 项；设置列表与中文配置检查 26 项；发布 EXE 检查 9 项，共 226 项。WPF 测试可额外传入第二个 MDX 路径，增加一项真实多词典检查，不猜测外部文件名。测试使用临时设置，覆盖原有查询、历史、候选、资源和界面，以及配置首次初始化、非法配置、写入失败、异步资源统计、缺少 WebView2、实际单文件运行和缺少 .NET 的原生安装提示。
+此前基线：Core 自测 28 项；单个真实 MDX 的 WPF 集成检查 128 项；Entry / Layout 桥接分别 18 / 10 项；独立资源检查 7 项；设置列表与中文配置检查 26 项；发布 EXE 检查 9 项，共 226 项。WPF 测试可额外传入第二个 MDX 路径，增加一项真实多词典检查，不猜测外部文件名。测试使用临时设置，覆盖原有查询、历史、候选、资源和界面，以及配置首次初始化、非法配置、写入失败、异步资源统计、缺少 WebView2、实际单文件运行和缺少 .NET 的原生安装提示。
 
 按修改范围运行：设置修改先跑 `--settings`，资源修改跑 `--local-resources`，查词或浏览器修改跑 WPF 与相应 JS 检查；正式发布前运行 `--published`。发布脚本会清理应用 `bin`，不要与构建或测试同时执行。常规回归不再生成截图，也不检查图标像素数量等外观细节。
 
@@ -67,6 +69,7 @@ Core 自测 28 项；单个真实 MDX 的 WPF 集成检查 128 项；Entry / Lay
 
 - [模块职责与数据流](docs/architecture.md)
 - [单文件发布、运行时与用户配置](docs/single-file-deployment.md)
+- [仅英文 Warning / Error 的信息提示规则与验证](docs/notification-policy.md)
 - [查询刷新、隐藏容器与折叠](docs/result-visibility.md)
 - [独立 CSS 与同目录资源读取修复](docs/local-resources.md)
 - [最新代码审查、整改与清理记录](docs/code-audit-2026-10-12.md)

@@ -93,7 +93,7 @@ namespace Mdict.Wpf.WebView
             }
             catch (WebView2RuntimeNotFoundException)
             {
-                return "请安装 Microsoft Edge WebView2 Runtime 后重试。下载：" + RuntimeDownloadUrl;
+                return "Install Microsoft Edge WebView2 Runtime and try again. Download: " + RuntimeDownloadUrl;
             }
         }
 

@@ -50,7 +50,7 @@ namespace Mdict.Wpf
             InitializeComponent();
             statusTimer.Interval = TimeSpan.FromSeconds(6);
             statusTimer.Tick += (_, _) => ShowStatus("");
-            ShowStatus("正在初始化…");
+            ShowStatus("");
             suggestionTimer.Interval = TimeSpan.FromMilliseconds(150);
             suggestionTimer.Tick += SuggestionTimer_Tick;
             controlsReady = true;
@@ -86,7 +86,7 @@ namespace Mdict.Wpf
             }
             catch (Exception ex)
             {
-                if (!closed) ShowStatus("设置加载失败：" + ex.Message);
+                if (!closed) ShowStatus("Error: Failed to load settings: " + ex.GetType().Name);
             }
             if (!closed)
             {
@@ -95,14 +95,14 @@ namespace Mdict.Wpf
                     string runtimeError = WebView.WebViewController.GetRuntimeError();
                     if (runtimeError != null)
                     {
-                        ShowStatus("请安装 Microsoft Edge WebView2 Runtime 后重试。");
+                        ShowStatus("Warning: Install Microsoft Edge WebView2 Runtime and try again.");
                         StatusText.ToolTip = runtimeError;
                         RuntimeHelp.Visibility = Visibility.Visible;
                     }
                 }
                 catch (Exception ex)
                 {
-                    ShowStatus("浏览器运行环境检测失败：" + ex.Message);
+                    ShowStatus("Error: Browser runtime check failed: " + ex.GetType().Name);
                     StatusText.ToolTip = StatusText.Text;
                 }
             }
@@ -116,7 +116,7 @@ namespace Mdict.Wpf
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
                     WebView.WebViewController.RuntimeDownloadUrl) { UseShellExecute = true });
             }
-            catch (Exception ex) { ShowStatus("无法打开下载页面：" + ex.Message); }
+            catch (Exception ex) { ShowStatus("Error: Could not open the download page: " + ex.GetType().Name); }
         }
 
         private async void SettingsButton_Click(object sender, RoutedEventArgs e)
@@ -127,7 +127,7 @@ namespace Mdict.Wpf
             try { DictionarySettings.Initialize(settingsPath); }
             catch (Exception ex)
             {
-                ShowStatus("设置初始化失败：" + ex.Message);
+                ShowStatus("Error: Could not initialize settings: " + ex.GetType().Name);
                 StatusText.ToolTip = StatusText.Text;
                 return;
             }
@@ -142,7 +142,7 @@ namespace Mdict.Wpf
                 }
                 catch (Exception ex)
                 {
-                    if (!closed) ShowStatus("词典设置应用失败：" + ex.Message);
+                    if (!closed) ShowStatus("Error: Could not apply dictionary settings: " + ex.GetType().Name);
                 }
             }
             if (!closed) WordText.Focus();
@@ -192,19 +192,17 @@ namespace Mdict.Wpf
         {
             string copyError = null;
             try { Clipboard.SetText(text); }
-            catch (System.Runtime.InteropServices.ExternalException ex) { copyError = ex.Message; }
+            catch (System.Runtime.InteropServices.ExternalException ex) { copyError = ex.GetType().Name; }
             if (!lookup || busy)
             {
-                ShowStatus(copyError == null ? "已复制所选文字。" : "复制失败：" + copyError);
+                if (copyError != null) ShowStatus("Error: Clipboard copy failed: " + copyError);
                 return;
             }
             int version = configurationVersion;
             await LookupAsync(text, true);
             if (closed || version != configurationVersion) return;
             string result = StatusText.Text;
-            if (copyError != null) ShowStatus("复制失败：" + copyError + "；" + result);
-            else ShowStatus(result.StartsWith("已加载：", StringComparison.Ordinal)
-                ? result.Replace("已加载：", "已复制并查询：") : "已复制；" + result);
+            if (copyError != null) ShowStatus("Error: Clipboard copy failed: " + copyError + "; " + result);
         }
 
         private async Task ApplyDictionaryPathsAsync(IEnumerable<string> paths)
@@ -223,7 +221,7 @@ namespace Mdict.Wpf
             history.Clear();
             historyIndex = -1;
             displayedWord = "";
-            ShowStatus("正在打开词典…");
+            ShowStatus("");
             var openErrors = new List<string>();
             try
             {
@@ -241,12 +239,11 @@ namespace Mdict.Wpf
                     catch (Exception ex)
                     {
                         if (closed || version != configurationVersion) return;
-                        openErrors.Add(Path.GetFileNameWithoutExtension(path) + "：" + ex.Message);
+                        openErrors.Add("Dictionary #" + sections.Count + ": " + ex.GetType().Name);
                     }
                 }
                 if (closed) return;
-                ShowStatus(configuredPaths.Count == 0 ? "尚未设置词典。" :
-                    openErrors.Count > 0 ? "词典打开失败：" + string.Join("；", openErrors) : "词典已打开。");
+                ShowStatus(openErrors.Count > 0 ? "Error: Failed to open dictionaries: " + string.Join("; ", openErrors) : "");
                 if (word.Length > 0 && configuredPaths.Count > 0) await LookupAsync(word, false);
             }
             finally
@@ -373,7 +370,7 @@ namespace Mdict.Wpf
                                 try { merged.AddRange(section.Service.SearchPrefix(prefix, PrefixFetchLimit)); }
                                 catch (Exception ex)
                                 {
-                                    errors.Add(Path.GetFileNameWithoutExtension(section.DictionaryPath) + "：" + ex.Message);
+                                    errors.Add("Dictionary #" + (Array.IndexOf(readers, section) + 1) + ": " + ex.GetType().Name);
                                 }
                             }
                             return merged;
@@ -382,7 +379,7 @@ namespace Mdict.Wpf
                     catch (Exception ex)
                     {
                         if (version == suggestionVersion && CanSuggest())
-                            ShowStatus("候选词查询失败：" + ex.Message);
+                            ShowStatus("Error: Suggestion lookup failed: " + ex.GetType().Name);
                         continue;
                     }
 
@@ -391,7 +388,7 @@ namespace Mdict.Wpf
                         !string.Equals(WordText.Text.Trim(), prefix, StringComparison.Ordinal))
                         continue;
 
-                    if (errors.Count > 0) ShowStatus("部分词典候选词查询失败：" + string.Join("；", errors));
+                    if (errors.Count > 0) ShowStatus("Warning: Suggestion lookup failed for some dictionaries: " + string.Join("; ", errors));
                     HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     List<string> suggestions = new List<string>();
                     foreach (string key in keys)
@@ -568,13 +565,13 @@ namespace Mdict.Wpf
             CloseSuggestions();
             if (word.Length == 0)
             {
-                ShowStatus("请输入查询词。");
+                ShowStatus("");
                 return;
             }
 
             if (manageBusy)
                 SetBusy(true);
-            ShowStatus("正在查询 " + word + "…");
+            ShowStatus("");
             int version = configurationVersion;
             try
             {
@@ -589,23 +586,21 @@ namespace Mdict.Wpf
                         if (section.IsAvailable)
                         {
                             try { html = section.Service.Lookup(word); }
-                            catch (Exception ex) { error = ex.Message; }
+                            catch (Exception ex) { error = ex.GetType().Name; }
                         }
-                        else error = "词典未打开";
+                        else error = "Dictionary is not open";
                         entries.Add((section, html, error));
                     }
                     return entries;
                 });
                 if (closed || version != configurationVersion) return;
-                int matched = 0;
                 int loaded = 0;
                 var displayErrors = new List<string>();
                 foreach (var result in results)
                 {
                     if (result.Error != null)
-                        displayErrors.Add(Path.GetFileNameWithoutExtension(result.Section.DictionaryPath) + "：" + result.Error);
+                        displayErrors.Add("Dictionary #" + (sections.IndexOf(result.Section) + 1) + ": " + result.Error);
                     if (!result.Section.IsAvailable || string.IsNullOrWhiteSpace(result.Html)) continue;
-                    matched++;
                     try
                     {
                         result.Section.PrepareResult();
@@ -619,14 +614,13 @@ namespace Mdict.Wpf
                     catch (Exception ex)
                     {
                         result.Section.Visibility = Visibility.Collapsed;
-                        displayErrors.Add(Path.GetFileNameWithoutExtension(result.Section.DictionaryPath) + "：" + ex.Message);
+                        displayErrors.Add("Dictionary #" + (sections.IndexOf(result.Section) + 1) + ": " + ex.GetType().Name);
                     }
                     if (closed || version != configurationVersion) return;
                 }
                 if (loaded == 0)
                 {
-                    ShowStatus((matched == 0 ? "未找到词条：" : "词条显示失败：") + word +
-                        (displayErrors.Count > 0 ? "；" + string.Join("；", displayErrors) : ""));
+                    ShowStatus(displayErrors.Count > 0 ? "Error: Dictionary lookup or display failed: " + string.Join("; ", displayErrors) : "");
                     return;
                 }
                 displayedWord = word;
@@ -634,15 +628,12 @@ namespace Mdict.Wpf
                 SetWordText(word);
                 CommitHistory(word, requestedHistoryIndex);
                 ResultsScroll.ScrollToTop();
-                ShowStatus("已加载：" + word + "；命中 " + loaded + " / " + sections.Count + " 个词典" +
-                    (displayErrors.Count > 0 ? "；" + string.Join("；", displayErrors) : ""));
-                StatusText.ToolTip = string.Join("\n", sections.Where(s => s.IsAvailable && s.Visibility == Visibility.Visible)
-                    .Select(s => Path.GetFileNameWithoutExtension(s.DictionaryPath) + "：" + s.Controller.GetResourceSummary()));
+                ShowStatus(displayErrors.Count > 0 ? "Warning: Some dictionaries failed: " + string.Join("; ", displayErrors) : "");
             }
             catch (Exception ex)
             {
                 if (closed || version != configurationVersion) return;
-                ShowStatus("查询失败：" + ex.Message);
+                ShowStatus("Error: Lookup failed: " + ex.GetType().Name);
             }
             finally
             {
@@ -716,14 +707,14 @@ namespace Mdict.Wpf
                 }
                 target.PrepareResult();
                 await target.InitializeBrowserAsync();
-                int length = await target.Controller.ShowDiagnosticAsync();
+                await target.Controller.ShowDiagnosticAsync();
                 target.ShowBrowser();
-                if (!closed) ShowStatus("WebView2 自测已加载；DOM 文本 " + length + " 字符。");
+                if (!closed) ShowStatus("");
             }
             catch (Exception ex)
             {
                 if (target != null) target.Visibility = Visibility.Collapsed;
-                if (!closed) ShowStatus("WebView2 自测失败：" + ex.Message);
+                if (!closed) ShowStatus("Error: WebView2 diagnostic failed: " + ex.GetType().Name);
             }
             finally
             {

@@ -70,7 +70,7 @@ namespace Mdict.Wpf
                 path = Path.GetFullPath(path);
                 if (CurrentPaths().Contains(path, StringComparer.OrdinalIgnoreCase))
                 {
-                    ShowError("该词典已在列表中。");
+                    ShowError("Warning: This dictionary is already in the list.");
                     return;
                 }
                 DictionarySettings.ValidatePaths(new[] { path });
@@ -80,7 +80,7 @@ namespace Mdict.Wpf
             }
             catch (Exception ex) when (ex is ArgumentException || ex is IOException || ex is NotSupportedException)
             {
-                ShowError(ex.Message);
+                ShowError("Error: Could not add dictionary: " + ex.GetType().Name);
             }
         }
 
@@ -138,7 +138,7 @@ namespace Mdict.Wpf
             catch (Exception ex) when (ex is ArgumentException || ex is IOException ||
                 ex is UnauthorizedAccessException || ex is NotSupportedException)
             {
-                ShowError("设置保存失败：" + ex.Message);
+                ShowError("Error: Could not save settings: " + ex.GetType().Name);
             }
         }
 
