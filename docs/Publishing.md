@@ -30,3 +30,7 @@ GitHub 分发统一通过唯一的 portable-* 标签：先审查、验证并提�
 还需要本机 WebView2 Runtime；浏览器运行时不捆绑进 EXE。
 
 首次统一发布时，如果 dist/MdictViewer/MdictViewer.exe 仍存在，脚本将旧目录中的 dictionaries.json 复制到 dist/dictionaries.json；新旧配置内容不一致时停止，两个文件都保留。成功替换新 EXE 后删除旧 EXE，原配置留在旧目录作为备份，其他用户文件不移动、不删除。迁移后的发布不再读取这份旧备份，避免覆盖新设置。新的启动入口是 dist/MdictViewer.exe。
+
+## Unified release verification
+
+Run `tools/Test.ps1 -Suite Core` before publishing and `tools/Test-PublishedApp.ps1` afterward. The GitHub tag workflow now performs both steps before creating the Release. Local real-content Full checks are documented in [Testing](Testing.md).

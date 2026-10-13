@@ -16,12 +16,15 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - name: Test publishing safeguards
+      - name: Run core checks
         shell: powershell
-        run: .\tools\Test-Publish.ps1
+        run: .\tools\Test.ps1 -Suite Core
       - name: Publish portable EXE
         shell: powershell
         run: .\tools\Publish.ps1
+      - name: Verify published EXE
+        shell: powershell
+        run: .\tools\Test-PublishedApp.ps1
       - name: Create GitHub Release
         shell: pwsh
         env:

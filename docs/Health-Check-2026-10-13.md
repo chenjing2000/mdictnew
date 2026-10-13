@@ -50,3 +50,10 @@ dotnet run -c Release --project .\dev-tests\Mdict.Wpf.Tests -- --published .\dis
 ```
 
 迁移与分发规则见 [统一发布流程](Publishing.md)。旧审计文档中的发布路径和缓存清理属于对应历史版本，不是当前发布入口。
+## Unified testing and acceptance verification
+
+Full: core reader, entry/layout bridges, local resources, settings and notification checks passed, plus all 129 Oxford V14.3 native WPF checks. No Full groups were skipped. Published integration: 9 application-specific checks passed.
+
+Published EXE acceptance passed: isolated EXE-only folder with spaces, renamed executable, a different working directory, correct configuration placement, clean shutdown, and native missing-.NET installation instructions under an isolated runtime root. Installed runtimes and original media were not modified. This verifies automated behavior; human listening and a fresh-machine graphical runtime prompt were not performed.
+
+The orchestration regression passed success, failure rejection, and optional-data handling checks. PowerShell source was verified as English ASCII with no syntax errors. Use [Testing](Testing.md) for the shared entry points; stage counts and individual case counts are reported separately.
