@@ -33,6 +33,7 @@ internal static class Program
             Console.Error.WriteLine("Usage: dotnet run --project dev-tests/Mdict.Wpf.Tests -- <dictionary.mdx> [second-dictionary.mdx]");
             return 2;
         }
+        bool completed = false;
         var app = new System.Windows.Application();
         app.DispatcherUnhandledException += (_, e) =>
         {
@@ -263,11 +264,17 @@ internal static class Program
                 Console.WriteLine("Checks: " + checks + "; Failures: " + failures);
                 string testSettings = Field<string>("settingsPath");
                 if (File.Exists(testSettings)) File.Delete(testSettings);
+                completed = true;
                 window.Close();
                 app.Shutdown();
             }
         };
         app.Run(window);
+        if (!completed)
+        {
+            Console.Error.WriteLine("The WPF test window closed before all checks completed.");
+            return 1;
+        }
         return failures == 0 ? 0 : 1;
     }
 
@@ -302,6 +309,11 @@ internal static class Program
                 var browser = Field<List<DictionaryResultView>>("sections")[0].Browser;
                 window.Activate();
                 var point = browser.PointToScreen(new Point(x, y));
+                var viewport = (ScrollViewer)window.FindName("ResultsScroll");
+                var topLeft = viewport.PointToScreen(new Point());
+                var bottomRight = viewport.PointToScreen(new Point(viewport.ActualWidth, viewport.ActualHeight));
+                if (point.X < topLeft.X || point.Y < topLeft.Y || point.X >= bottomRight.X || point.Y >= bottomRight.Y)
+                    throw new InvalidOperationException("Native double-click target is outside the visible results viewport.");
                 GetCursorPos(out var previousCursor);
                 try
                 {

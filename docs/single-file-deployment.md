@@ -1,14 +1,14 @@
 # 单文件发布、运行时与用户配置
 
-日期：2026-10-12。本文件记录当前实施的发布方案；历史文档中的文件夹发布和 AppData 配置路径属于旧行为。
+更新日期：2026-10-13。当前发布入口与迁移规则见 [统一发布](Publishing.md)。下文保留此前单文件功能验证记录；历史文件夹发布和 AppData 配置路径属于旧行为。
 
 ## 发布与依赖
 
-执行根目录 `tools/Publish.ps1`，输出 `dist/MdictViewer/MdictViewer.exe`。分发时只需提供这个 EXE；首次使用设置后，目录中还会有用户自己的 `dictionaries.json`。本次产物约 24.6 MiB。
+执行根目录 `tools/Publish.ps1`，输出 `dist/MdictViewer.exe`。分发时只需提供这个 EXE；首次使用设置后，目录中还会有用户自己的 `dictionaries.json`。本次产物约 24.6 MiB。
 
-发布参数为 `-c Release -r win-x64 --self-contained false`、`PublishSingleFile=true`、`IncludeNativeLibrariesForSelfExtract=true`。不启用裁剪，不发布 PDB 或 XML 文档。应用 DLL 和 WebView2 托管组件、原生加载器包含在 EXE 中；原生加载器由 .NET 在运行时解压到缓存。这是分发单文件，不代表运行时完全不生成临时文件。
+统一使用 `Properties/PublishProfiles/Portable.pubxml` 配置，核心参数相当于 `-c Release -r win-x64 --self-contained false`、`PublishSingleFile=true`、`IncludeNativeLibrariesForSelfExtract=true`。不启用裁剪，不发布 PDB 或 XML 文档。应用 DLL 和 WebView2 托管组件、原生加载器包含在 EXE 中；原生加载器由 .NET 在运行时解压到缓存。这是分发单文件，不代表运行时完全不生成临时文件。
 
-脚本先发布到临时目录，确认输出确实只有 EXE，再替换正式产物；构建或产物检查失败保留旧发布。成功后删除旧文件夹发布的已知 DLL、元数据、旧浏览器缓存目录及三个应用项目的 `bin`，保留配置、其他用户文件和 `obj`。正在运行的 EXE 应先关闭。
+脚本先发布到临时目录，确认输出确实只有 EXE，再替换正式产物；构建或产物检查失败保留旧发布。成功后删除迁移目录中的旧 EXE；旧配置保留为备份，其他用户文件及 `bin/obj` 保留。正在运行的 EXE 应先关闭。
 
 运行需要 Windows x64、.NET 10 Desktop Runtime x64 和 WebView2 Runtime，不需要 .NET SDK。程序不捆绑、不下载、不安装这两种运行时。
 

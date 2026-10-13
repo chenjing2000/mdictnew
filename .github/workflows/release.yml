@@ -1,0 +1,35 @@
+name: Portable release
+
+on:
+  push:
+    tags:
+      - 'portable-*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Test publishing safeguards
+        shell: powershell
+        run: .\tools\Test-Publish.ps1
+      - name: Publish portable EXE
+        shell: powershell
+        run: .\tools\Publish.ps1
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $exe = @(Get-ChildItem -LiteralPath dist -Filter *.exe -File)
+          if ($exe.Count -ne 1) { throw 'Expected one release EXE.' }
+          gh release create "$env:RELEASE_TAG" "$($exe[0].FullName)" --verify-tag --title "$env:RELEASE_TAG" --notes-file docs/Release-Notes.md
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub Release creation failed.' }

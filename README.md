@@ -2,7 +2,7 @@
 
 C# / .NET 10 / WPF + WebView2 的本地 MDX 查词程序。已用 Oxford 第 10 版 V14.3 MDX 和五个配套 MDD 分卷进行集成测试，不保证兼容所有第三方词典格式。
 
-唯一发布入口：`dist/MdictViewer/MdictViewer.exe`。
+唯一发布入口：`dist/MdictViewer.exe`。
 
 ## 当前功能
 
@@ -52,7 +52,7 @@ powershell.exe -NoProfile -File .\tools\Publish.ps1
 
 项目的 PowerShell 脚本提示均为英文。`Publish.ps1` 保留 UTF-8 BOM，兼容 Windows 自带的 PowerShell 5.1 和 PowerShell 7；脚本编码与 LF / CRLF 换行符不同。用户 JSON 配置继续使用 UTF-8 无 BOM。
 
-脚本先在临时目录发布并验证只有 `MdictViewer.exe`，再替换 `dist/MdictViewer` 中的发布程序，保留用户配置；成功后清除旧文件夹发布的已知依赖和三个应用项目的重复 `bin` 输出。应用 DLL、WebView2 托管组件及原生加载器包含在 EXE 中；原生库由 .NET 在运行时解压到缓存，不需要旁放 DLL。浏览器缓存位于 `%LocalAppData%/MdictViewer/WebView2`。保留可再生成的 `obj` 编译缓存，不创建 `artifacts` 或按修改版本命名的发布目录。`dotnet run` 用于开发，会产生常规 `bin/obj` 输出。
+脚本先在临时目录发布并验证只有 `MdictViewer.exe`，再替换 `dist/` 中的发布程序，保留用户配置；成功后移除迁移目录中的旧 EXE；保留其他用户文件和构建缓存。应用 DLL、WebView2 托管组件及原生加载器包含在 EXE 中；原生库由 .NET 在运行时解压到缓存，不需要旁放 DLL。浏览器缓存位于 `%LocalAppData%/MdictViewer/WebView2`。保留可再生成的 `obj` 编译缓存，不创建 `artifacts` 或按修改版本命名的发布目录。`dotnet run` 用于开发，会产生常规 `bin/obj` 输出。
 
 ## 验证
 
@@ -64,12 +64,12 @@ dotnet run --project .\dev-tests\Mdict.Wpf.Tests -- "<Oxford MDX 完整路径>"
 dotnet run --project .\dev-tests\Mdict.Wpf.Tests -- --local-resources
 dotnet run --project .\dev-tests\Mdict.Wpf.Tests -- --settings
 dotnet run -c Release --project .\dev-tests\Mdict.Wpf.Tests -- --notifications
-dotnet run -c Release --project .\dev-tests\Mdict.Wpf.Tests -- --published .\dist\MdictViewer\MdictViewer.exe
+dotnet run -c Release --project .\dev-tests\Mdict.Wpf.Tests -- --published .\dist\MdictViewer.exe
 ```
 
 此前基线：Core 自测 28 项；单个真实 MDX 的 WPF 集成检查 128 项；Entry / Layout 桥接分别 18 / 10 项；独立资源检查 7 项；设置列表与中文配置检查 26 项；发布 EXE 检查 9 项，共 226 项。WPF 测试可额外传入第二个 MDX 路径，增加一项真实多词典检查，不猜测外部文件名。测试使用临时设置，覆盖原有查询、历史、候选、资源和界面，以及配置首次初始化、非法配置、写入失败、异步资源统计、缺少 WebView2、实际单文件运行和缺少 .NET 的原生安装提示。
 
-按修改范围运行：设置修改先跑 `--settings`，资源修改跑 `--local-resources`，查词或浏览器修改跑 WPF 与相应 JS 检查；正式发布前运行 `--published`。发布脚本会清理应用 `bin`，不要与构建或测试同时执行。常规回归不再生成截图，也不检查图标像素数量等外观细节。
+按修改范围运行：设置修改先跑 `--settings`，资源修改跑 `--local-resources`，查词或浏览器修改跑 WPF 与相应 JS 检查；正式发布前运行 `--published`。发布脚本不清理应用 `bin/obj`；不要与同一项目的构建或测试同时执行。常规回归不再生成截图，也不检查图标像素数量等外观细节。
 
 这些测试不替代原生键鼠操作和实际音频试听，也不证明所有词典脚本兼容。重新构建默认输出中的主程序前，应关闭对应实例，避免文件占用。
 
@@ -86,6 +86,10 @@ dotnet run -c Release --project .\dev-tests\Mdict.Wpf.Tests -- --published .\dis
 - [代码审查、整改和清理记录](docs/review-and-cleanup.md)
 - [历史 handoff、调试记录和方案](docs/history/README.md)
 
-源码、正式测试、图标工具和历史文档保留；旧构建、旧发布、临时诊断工具、日志和截图已清理，不保留 `artifacts`。发布统一位于 `dist/MdictViewer`，由 `.gitignore` 排除。历史文档中的旧生成文件路径仅作为当时的记录，文件已清理。词典文件、WebView2 缓存和个人 IDE 设置不进入版本管理；合法的图片、HTML 和音频资源不被全局忽略。
+源码、正式测试、图标工具和历史文档保留；旧构建、旧发布、临时诊断工具、日志和截图已清理，不保留 `artifacts`。发布统一位于 `dist/`，由 `.gitignore` 排除。历史文档中的旧生成文件路径仅作为当时的记录，文件已清理。词典文件、WebView2 缓存和个人 IDE 设置不进入版本管理；合法的图片、HTML 和音频资源不被全局忽略。
 
 暂不实现模糊查询、全文搜索、拼写纠错、新索引系统或历史持久化。精确键映射、前缀线性扫描及现有记录定位保持不变，实际出现瓶颈后再测量和优化。
+
+## 统一发布与本次体检
+
+发布入口统一为 `.\tools\Publish.ps1`，参数统一保存在主项目的 `Properties/PublishProfiles/Portable.pubxml`。详见[统一发布流程](docs/Publishing.md)、[2026-10-13 体检报告](docs/Health-Check-2026-10-13.md)和[发布说明](docs/Release-Notes.md)。
