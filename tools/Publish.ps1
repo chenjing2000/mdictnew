@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $workspace = Split-Path -Parent $PSScriptRoot
 $publishDirectory = Join-Path $workspace 'dist\MdictViewer'
 $stagingDirectory = Join-Path $publishDirectory ('.publish-' + [Guid]::NewGuid().ToString('N'))
@@ -10,14 +10,14 @@ try {
         -p:DebugType=None -p:DebugSymbols=false -p:PublishTrimmed=false `
         -p:PublishDocumentationFiles=false -o $stagingDirectory --nologo
     if ($LASTEXITCODE -ne 0) {
-        throw '发布失败，现有输出已保留。请检查构建错误或关闭占用发布文件的程序。'
+        throw 'Publishing failed; existing output has been preserved. Check the build errors or close any application using the published files.'
     }
 
     # XML documentation is not needed at runtime; never drop a DLL to fake a single-file package.
     Get-ChildItem -LiteralPath $stagingDirectory -Filter '*.xml' -File | Remove-Item -Force
     $output = @(Get-ChildItem -LiteralPath $stagingDirectory -Force)
     if ($output.Count -ne 1 -or $output[0].Name -ne 'MdictViewer.exe') {
-        throw '发布输出不是单个 EXE，现有发布及配置已保留。'
+        throw 'The output is not a single EXE; the existing release and configuration have been preserved.'
     }
     Move-Item -LiteralPath $output[0].FullName -Destination (Join-Path $publishDirectory 'MdictViewer.exe') -Force
 
@@ -36,17 +36,17 @@ try {
     foreach ($relativePath in $cleanupDirectories) {
         $buildDirectory = [IO.Path]::GetFullPath((Join-Path $workspace $relativePath))
         if (-not $buildDirectory.StartsWith($workspace + '\', [StringComparison]::OrdinalIgnoreCase)) {
-            throw "构建目录超出项目范围：$buildDirectory"
+            throw "Build directory is outside the workspace: $buildDirectory"
         }
         if (Test-Path -LiteralPath $buildDirectory) {
             $items = @(Get-Item -LiteralPath $buildDirectory) + @(Get-ChildItem -LiteralPath $buildDirectory -Force -Recurse)
             if (@($items | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count -gt 0) {
-                throw "清理目录含重解析点，已保留：$buildDirectory"
+                throw "Cleanup directory contains a reparse point and has been preserved: $buildDirectory"
             }
             Remove-Item -LiteralPath $buildDirectory -Recurse -Force
         }
     }
-    Write-Host "发布完成：$publishDirectory\MdictViewer.exe"
+    Write-Host "Published: $publishDirectory\MdictViewer.exe"
 }
 finally {
     $stagingDirectory = [IO.Path]::GetFullPath($stagingDirectory)

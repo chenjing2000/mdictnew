@@ -44,6 +44,14 @@ dotnet run --project .\Mdict.Wpf
 .\tools\Publish.ps1
 ```
 
+在命令提示符 CMD 中，需要显式调用 PowerShell，而不是按文件关联打开脚本：
+
+```cmd
+powershell.exe -NoProfile -File .\tools\Publish.ps1
+```
+
+项目的 PowerShell 脚本提示均为英文。`Publish.ps1` 保留 UTF-8 BOM，兼容 Windows 自带的 PowerShell 5.1 和 PowerShell 7；脚本编码与 LF / CRLF 换行符不同。用户 JSON 配置继续使用 UTF-8 无 BOM。
+
 脚本先在临时目录发布并验证只有 `MdictViewer.exe`，再替换 `dist/MdictViewer` 中的发布程序，保留用户配置；成功后清除旧文件夹发布的已知依赖和三个应用项目的重复 `bin` 输出。应用 DLL、WebView2 托管组件及原生加载器包含在 EXE 中；原生库由 .NET 在运行时解压到缓存，不需要旁放 DLL。浏览器缓存位于 `%LocalAppData%/MdictViewer/WebView2`。保留可再生成的 `obj` 编译缓存，不创建 `artifacts` 或按修改版本命名的发布目录。`dotnet run` 用于开发，会产生常规 `bin/obj` 输出。
 
 ## 验证
