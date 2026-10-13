@@ -57,3 +57,9 @@ Full: core reader, entry/layout bridges, local resources, settings and notificat
 Published EXE acceptance passed: isolated EXE-only folder with spaces, renamed executable, a different working directory, correct configuration placement, clean shutdown, and native missing-.NET installation instructions under an isolated runtime root. Installed runtimes and original media were not modified. This verifies automated behavior; human listening and a fresh-machine graphical runtime prompt were not performed.
 
 The orchestration regression passed success, failure rejection, and optional-data handling checks. PowerShell source was verified as English ASCII with no syntax errors. Use [Testing](Testing.md) for the shared entry points; stage counts and individual case counts are reported separately.
+
+## Code audit final verification
+
+Core, entry/layout, local-resource, 26 settings and 11 notification checks passed, together with all 129 Oxford V14.3 WPF integration checks. Nine application-specific published checks also passed. All Full groups passed with zero failures and zero skips. The newly published portable EXE passed isolated renamed-file launch, configuration placement, clean shutdown, and missing-.NET instruction checks. See [Code Review](Code-Review-2026-10-13.md) for module assessment, actual changes and preserved complexity.
+
+Original article files and the selected audio were verified unchanged with 370 SHA-256 comparisons. UI and real playback checks were run serially. Manual listening and a clean-machine graphical runtime prompt were not performed. Regenerable compilation and test output are cleaned after verification; dist, settings and user media are retained.

@@ -39,6 +39,25 @@ internal static class NotificationTests
                 var text = ((TextBlock)window.FindName("StatusText")).Text;
                 Check(text.StartsWith("Error: ") && text.All(c => c < 128), "display failure is an English error even with a Chinese filename");
                 Check(((UIElement)window.FindName("StatusPanel")).Visibility == Visibility.Visible, "error shows the information bar");
+                string malformed = Path.Combine(directory, "malformed.mdx");
+                File.WriteAllText(malformed, "not a dictionary");
+                await (Task)Invoke("ApplyDictionaryPathsAsync", (object)new[]
+                {
+                    Path.Combine(directory, "missing.mdx"), malformed, dictionary
+                });
+                var input = (TextBox)window.FindName("WordText");
+                input.Focus();
+                input.Text = "ap";
+                Invoke("SuggestionTimer_Tick", null, EventArgs.Empty);
+                var deadline = DateTime.UtcNow.AddSeconds(10);
+                while (Field<bool>(window, "suggestionSearchRunning"))
+                {
+                    if (DateTime.UtcNow > deadline) throw new TimeoutException("Suggestion warning");
+                    await Task.Delay(25);
+                }
+                text = ((TextBlock)window.FindName("StatusText")).Text;
+                Check(text.Contains("Dictionary #2:") && !text.Contains("Dictionary #1:"),
+                    "suggestion failures identify the configured dictionary after an unavailable entry");
                 string oldFolder = Environment.GetEnvironmentVariable("WEBVIEW2_BROWSER_EXECUTABLE_FOLDER");
                 var missingRuntime = new MainWindow(Path.Combine(directory, "missing-runtime.json"));
                 try

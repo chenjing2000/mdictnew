@@ -21,3 +21,4 @@ All four applications use the following document responsibilities. Application-s
 ## Maintenance rules
 
 Keep executable commands in Testing and Publishing; link them from usage guides. Keep settings rules in Configuration. Record dated results in Health Check rather than implying that an old result verifies later changes. Domain references describe file formats and behavior, not another publishing pipeline. Historical audits and plans remain historical and are not the current workflow entry point.
+本轮代码结构审查与整改见 [Code Review](Code-Review-2026-10-13.md)。

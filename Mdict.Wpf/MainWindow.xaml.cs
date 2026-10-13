@@ -361,16 +361,19 @@ namespace Mdict.Wpf
                     var errors = new List<string>();
                     try
                     {
-                        var readers = sections.Where(s => s.IsAvailable).ToArray();
+                        // Preserve configured positions even when an earlier dictionary cannot open.
+                        var readers = sections.ToArray();
                         keys = await Task.Run(() =>
                         {
                             var merged = new List<string>();
-                            foreach (var section in readers)
+                            for (int index = 0; index < readers.Length; index++)
                             {
+                                var section = readers[index];
+                                if (!section.IsAvailable) continue;
                                 try { merged.AddRange(section.Service.SearchPrefix(prefix, PrefixFetchLimit)); }
                                 catch (Exception ex)
                                 {
-                                    errors.Add("Dictionary #" + (Array.IndexOf(readers, section) + 1) + ": " + ex.GetType().Name);
+                                    errors.Add("Dictionary #" + (index + 1) + ": " + ex.GetType().Name);
                                 }
                             }
                             return merged;

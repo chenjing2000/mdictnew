@@ -26,6 +26,9 @@ dictionaries.json
 /dev-tests/screenshots/
 *.trx
 *.log
+*.dmp
+coverage/
+coverage.xml
 
 # Temporary and OS files; legitimate source images/HTML are not ignored
 *.tmp
@@ -38,3 +41,6 @@ dictionaries.json
 Thumbs.db
 Desktop.ini
 .DS_Store
+# Local Python cache if development tooling is used
+__pycache__/
+*.py[cod]

@@ -39,12 +39,20 @@ namespace Mdict.Wpf
 
         public static List<string> ValidatePaths(IEnumerable<string> paths, bool requireExistingFiles = true)
         {
-            var result = paths.Where(p => !string.IsNullOrWhiteSpace(p))
-                .Select(p => Path.GetFullPath(p.Trim())).ToList();
+            var result = new List<string>();
+            foreach (string path in paths)
+            {
+                if (!string.IsNullOrWhiteSpace(path))
+                    result.Add(Path.GetFullPath(path.Trim()));
+            }
             if (result.Count > MaxDictionaries)
                 throw new ArgumentException("最多可以设置 8 个词典路径。");
-            if (result.Distinct(StringComparer.OrdinalIgnoreCase).Count() != result.Count)
-                throw new ArgumentException("词典路径不能重复。");
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string path in result)
+            {
+                if (!seen.Add(path))
+                    throw new ArgumentException("词典路径不能重复。");
+            }
             foreach (string path in result)
             {
                 if (!string.Equals(Path.GetExtension(path), ".mdx", StringComparison.OrdinalIgnoreCase) ||
